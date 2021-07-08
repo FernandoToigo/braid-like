@@ -1,0 +1,5 @@
+/target
+.idea
+
+# Vim file recovery files
+*.swp
