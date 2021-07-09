@@ -11,19 +11,22 @@ fn main() {
     let start = Instant::now();
     let mut last_micros: u128 = 0;
 
-    println!("Started.");
+    let profiler = init_profiler();
 
     event_loop.run(move |event, _, control_flow| {
+        update_profiler(&profiler);
+
         let now_micros = start.elapsed().as_micros();
+        let delta_micros = now_micros - last_micros;
+
         let event_results = read_events(event, &window);
-        update();
+
+        update(delta_micros);
+
         let render_result = render(&renderer, &event_results);
+
         *control_flow = resolve_frame(&event_results, render_result);
-        println!(
-            "DeltaTime= {}mil Render={})",
-            ((now_micros - last_micros) as f32) / 1000.,
-            event_results.should_render
-        );
+
         last_micros = now_micros;
     });
 }
@@ -33,13 +36,30 @@ struct EventResults {
     should_exit: bool,
 }
 
+fn init_profiler() -> puffin_http::Server {
+    let server_addr = format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT);
+    let puffin_server = puffin_http::Server::new(&server_addr).unwrap();
+    puffin::set_scopes_on(true);
+
+    eprintln!("Serving demo profile data on {}", server_addr);
+
+    puffin_server
+}
+
+fn update_profiler(puffin_server: &puffin_http::Server) {
+    puffin::GlobalProfiler::lock().new_frame();
+    puffin_server.update();
+}
+
 fn resolve_frame(
     event_handling: &EventResults,
-    draw_result: Result<(), wgpu::SwapChainError>,
+    render_result: Result<(), wgpu::SwapChainError>,
 ) -> ControlFlow {
+    puffin::profile_function!();
+
     match event_handling.should_exit {
         true => ControlFlow::Exit,
-        false => match draw_result {
+        false => match render_result {
             Ok(_) => ControlFlow::Poll,
             // Recreate the swap_chain if lost
             //Err(wgpu::SwapChainError::Lost) => state.resize(state.size),
@@ -54,6 +74,8 @@ fn resolve_frame(
 }
 
 fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
+    puffin::profile_function!();
+
     let mut event_results = EventResults {
         should_render: false,
         should_exit: false,
@@ -97,12 +119,16 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
     event_results
 }
 
-fn update() {}
+fn update(_delta_micros: u128) {
+    puffin::profile_function!();
+}
 
 fn render(
     renderer: &WgpuRenderer,
     event_handling: &EventResults,
 ) -> Result<(), wgpu::SwapChainError> {
+    puffin::profile_function!();
+
     match event_handling.should_render {
         true => renderer.render(),
         false => Ok(()),

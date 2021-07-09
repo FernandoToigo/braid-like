@@ -401,15 +401,23 @@ impl WgpuRenderer {
     }
 
     pub fn render(&self) -> Result<(), wgpu::SwapChainError> {
-        let frame = self
-            .swap_chain
-            .get_current_frame()?
-            .output;
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Render Encoder")
-        });
+        let frame = {
+            puffin::profile_scope!("get current frame");
+            self
+                .swap_chain
+                .get_current_frame()?
+                .output
+        };
+
+        let mut encoder = {
+            puffin::profile_scope!("create command");
+            self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder")
+            })
+        };
 
         {
+            puffin::profile_scope!("create render_pass");
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[
@@ -437,15 +445,6 @@ impl WgpuRenderer {
                 }),
             });
 
-            /*render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.sprite_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
-            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);*/
-
-
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
@@ -456,6 +455,11 @@ impl WgpuRenderer {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
+
+        {
+            puffin::profile_scope!("drop: frame (full render?)");
+            drop(frame);
+        }
 
         Ok(())
     }
