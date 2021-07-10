@@ -6,12 +6,21 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::window::Window;
 
+pub struct GameState {
+    player_position: cgmath::Vector2<f32>,
+    micros_from_start: u128,
+}
+
 fn main() {
-    let (event_loop, window, renderer) = block_on(WgpuRenderer::init());
+    let (event_loop, window, mut renderer) = block_on(WgpuRenderer::init());
     let start = Instant::now();
     let mut last_micros: u128 = 0;
 
     let profiler = init_profiler();
+    let mut game_state = GameState {
+        player_position: cgmath::Vector2::<_>::new(0., 0.),
+        micros_from_start: 0,
+    };
 
     event_loop.run(move |event, _, control_flow| {
         update_profiler(&profiler);
@@ -21,9 +30,9 @@ fn main() {
 
         let event_results = read_events(event, &window);
 
-        update(delta_micros);
+        update(&mut game_state, delta_micros);
 
-        let render_result = render(&renderer, &event_results);
+        let render_result = render(&mut renderer, &event_results, &game_state);
 
         *control_flow = resolve_frame(&event_results, render_result);
 
@@ -119,18 +128,27 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
     event_results
 }
 
-fn update(_delta_micros: u128) {
+fn update(game_state: &mut GameState, delta_micros: u128) {
     puffin::profile_function!();
+
+    game_state.micros_from_start += delta_micros;
+
+    let radians_per_second = std::f32::consts::PI * 0.5;
+    let radians_per_micros = radians_per_second / 1e+6;
+    let x = (game_state.micros_from_start as f32 * radians_per_micros).cos();
+    let y = (game_state.micros_from_start as f32 * radians_per_micros).sin();
+    game_state.player_position = cgmath::Vector2::<_>::new(x, y);
 }
 
 fn render(
-    renderer: &WgpuRenderer,
+    renderer: &mut WgpuRenderer,
     event_handling: &EventResults,
+    game_state: &GameState,
 ) -> Result<(), wgpu::SwapChainError> {
     puffin::profile_function!();
 
     match event_handling.should_render {
-        true => renderer.render(),
+        true => renderer.render(&game_state),
         false => Ok(()),
     }
 }

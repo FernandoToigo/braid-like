@@ -24,10 +24,15 @@ pub struct WgpuRenderer {
     pub quad_index_buffer: wgpu::Buffer,
     pub instance_buffer: wgpu::Buffer,
     pub num_indices: u32,
-    pub instances: Vec<Instance>,
     pub depth_texture: Texture,
     pub player_texture: Texture,
     pub sprite_bind_group: wgpu::BindGroup,
+    pub instances: Instances
+}
+
+pub struct Instances {
+    player: Instance,
+    count: u32,
 }
 
 pub struct Instance {
@@ -364,12 +369,16 @@ impl WgpuRenderer {
         let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
         let rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0));
 
-        let instances = vec![Instance {
-            position,
-            rotation,
-        }];
+        let instances = Instances {
+            player: Instance {
+                position,
+                rotation,
+            },
+            count: 1
+        };
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instances_vec = vec![&instances.player];
+        let instance_data = instances_vec.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
@@ -400,7 +409,9 @@ impl WgpuRenderer {
          })
     }
 
-    pub fn render(&self) -> Result<(), wgpu::SwapChainError> {
+    pub fn render(&mut self, game_state: &crate::GameState) -> Result<(), wgpu::SwapChainError> {
+        self.update_buffers(&game_state);
+
         let frame = {
             puffin::profile_scope!("get current frame");
             self
@@ -451,7 +462,7 @@ impl WgpuRenderer {
             render_pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.sprite_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.count as _);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -462,6 +473,16 @@ impl WgpuRenderer {
         }
 
         Ok(())
+    }
+
+    fn update_buffers(&mut self, game_state: &crate::GameState) {
+        self.instances.player.position = game_state.player_position.extend(0.);
+
+        let raw = self.instances.player.to_raw();
+        self.queue.write_buffer(
+            &self.instance_buffer,
+            0,
+            bytemuck::cast_slice(&[raw]));
     }
 }
 
