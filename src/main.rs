@@ -6,43 +6,66 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 use winit::window::Window;
 
+pub struct Game {
+    renderer: WgpuRenderer,
+    start_instant: Instant,
+    last_micros: u128,
+    game_state: GameState,
+    profiler: puffin_http::Server,
+}
+
 pub struct GameState {
     player_position: cgmath::Vector2<f32>,
     micros_from_start: u128,
 }
 
+struct EventResults {
+    events_finished: bool,
+    exit_requested: bool,
+}
+
 fn main() {
-    let (event_loop, window, mut renderer) = block_on(WgpuRenderer::init());
-    let start = Instant::now();
-    let mut last_micros: u128 = 0;
+    let (event_loop, window, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
-    let mut game_state = GameState {
+
+    let game_state = GameState {
         player_position: cgmath::Vector2::<_>::new(0., 0.),
         micros_from_start: 0,
     };
 
+    let mut game = Game {
+        renderer,
+        start_instant: Instant::now(),
+        last_micros: 0,
+        game_state,
+        profiler,
+    };
+
     event_loop.run(move |event, _, control_flow| {
-        update_profiler(&profiler);
-
-        let now_micros = start.elapsed().as_micros();
-        let delta_micros = now_micros - last_micros;
-
         let event_results = read_events(event, &window);
 
-        update(&mut game_state, delta_micros);
+        let frame_result = match event_results.events_finished {
+            true => frame(&mut game),
+            false => Ok(()),
+        };
 
-        let render_result = render(&mut renderer, &event_results, &game_state);
-
-        *control_flow = resolve_frame(&event_results, render_result);
-
-        last_micros = now_micros;
+        *control_flow = resolve_frame(&event_results, frame_result);
     });
 }
 
-struct EventResults {
-    should_render: bool,
-    should_exit: bool,
+fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
+    let now_micros = game.start_instant.elapsed().as_micros();
+    let delta_micros = now_micros - game.last_micros;
+
+    update_profiler(&game.profiler);
+
+    update(&mut game.game_state, delta_micros);
+    render(&mut game.renderer, &game.game_state)?;
+
+    game.last_micros = now_micros;
+
+    Ok(())
 }
 
 fn init_profiler() -> puffin_http::Server {
@@ -50,7 +73,10 @@ fn init_profiler() -> puffin_http::Server {
     let puffin_server = puffin_http::Server::new(&server_addr).unwrap();
     puffin::set_scopes_on(true);
 
-    eprintln!("Serving demo profile data on {}", server_addr);
+    println!(
+        "Serving profile data on {}. Use puffin_viewer to see it.",
+        server_addr
+    );
 
     puffin_server
 }
@@ -66,7 +92,7 @@ fn resolve_frame(
 ) -> ControlFlow {
     puffin::profile_function!();
 
-    match event_handling.should_exit {
+    match event_handling.exit_requested {
         true => ControlFlow::Exit,
         false => match render_result {
             Ok(_) => ControlFlow::Poll,
@@ -75,7 +101,7 @@ fn resolve_frame(
             Err(wgpu::SwapChainError::OutOfMemory) => ControlFlow::Exit,
             Err(e) => {
                 // All other errors (Outdated, Timeout) should be resolved by the next frame
-                eprintln!("{:?}", e);
+                eprintln!("Unexpected error: {:?}", e);
                 ControlFlow::Poll
             }
         },
@@ -86,8 +112,8 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
     puffin::profile_function!();
 
     let mut event_results = EventResults {
-        should_render: false,
-        should_exit: false,
+        events_finished: false,
+        exit_requested: false,
     };
 
     match event {
@@ -96,13 +122,13 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
             window_id,
         } if window_id == window.id() => {
             match event {
-                WindowEvent::CloseRequested => event_results.should_exit = true,
+                WindowEvent::CloseRequested => event_results.exit_requested = true,
                 WindowEvent::KeyboardInput { input, .. } => match input {
                     KeyboardInput {
                         state: ElementState::Pressed,
                         virtual_keycode: Some(VirtualKeyCode::Escape),
                         ..
-                    } => event_results.should_exit = true,
+                    } => event_results.exit_requested = true,
                     _ => {}
                 },
                 /*WindowEvent::Resized(physical_size) => {
@@ -114,12 +140,10 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
                 _ => {}
             }
         }
-        Event::RedrawRequested(_) => {
-            event_results.should_render = true;
-        }
         Event::MainEventsCleared => {
             // RedrawRequested will only trigger once, unless we manually
             // request it.
+            event_results.events_finished = true;
             window.request_redraw();
         }
         _ => {}
@@ -140,15 +164,7 @@ fn update(game_state: &mut GameState, delta_micros: u128) {
     game_state.player_position = cgmath::Vector2::<_>::new(x, y);
 }
 
-fn render(
-    renderer: &mut WgpuRenderer,
-    event_handling: &EventResults,
-    game_state: &GameState,
-) -> Result<(), wgpu::SwapChainError> {
+fn render(renderer: &mut WgpuRenderer, game_state: &GameState) -> Result<(), wgpu::SwapChainError> {
     puffin::profile_function!();
-
-    match event_handling.should_render {
-        true => renderer.render(&game_state),
-        false => Ok(()),
-    }
+    renderer.render(&game_state)
 }
