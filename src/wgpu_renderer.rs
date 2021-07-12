@@ -15,11 +15,13 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
 );
 
 pub struct WgpuRenderer {
+    pub window: winit::window::Window,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub swap_chain: wgpu::SwapChain,
     pub render_pipeline: wgpu::RenderPipeline,
     pub uniform_bind_group: wgpu::BindGroup,
+    pub uniform_buffer: wgpu::Buffer,
     pub quad_vertex_buffer: wgpu::Buffer,
     pub quad_index_buffer: wgpu::Buffer,
     pub instance_buffer: wgpu::Buffer,
@@ -188,9 +190,10 @@ impl Texture {
 }
 
 impl WgpuRenderer {
-    pub async fn init() -> (winit::event_loop::EventLoop<()>, winit::window::Window, Self) {
+    pub async fn init() -> (winit::event_loop::EventLoop<()>, Self) {
         let event_loop = winit::event_loop::EventLoop::new();
         let window = winit::window::WindowBuilder::new()
+            .with_title("braid-like")
             .build(&event_loop)
             .unwrap();
         let size = window.inner_size();
@@ -391,13 +394,14 @@ impl WgpuRenderer {
         let swap_chain = device.create_swap_chain(&surface, &sc_desc);
 
         (event_loop,
-         window,
          Self {
+             window,
              device,
              queue,
              depth_texture,
              render_pipeline,
              sprite_bind_group,
+             uniform_buffer,
              quad_index_buffer,
              quad_vertex_buffer,
              instance_buffer,
@@ -411,6 +415,11 @@ impl WgpuRenderer {
 
     pub fn render(&mut self, game_state: &crate::GameState) -> Result<(), wgpu::SwapChainError> {
         self.update_buffers(&game_state);
+        self.render_frame()
+    }
+
+    fn render_frame(&self) -> Result<(), wgpu::SwapChainError> {
+        puffin::profile_function!();
 
         let frame = {
             puffin::profile_scope!("get current frame");
@@ -476,6 +485,15 @@ impl WgpuRenderer {
     }
 
     fn update_buffers(&mut self, game_state: &crate::GameState) {
+        puffin::profile_function!();
+
+        //@Performance: only update buffers if the values were changed.
+
+        self.update_instances(&game_state);
+        self.update_uniforms(&game_state);
+    }
+
+    fn update_instances(&mut self, game_state: &crate::GameState) {
         self.instances.player.position = game_state.player_position.extend(0.);
 
         let raw = self.instances.player.to_raw();
@@ -483,6 +501,27 @@ impl WgpuRenderer {
             &self.instance_buffer,
             0,
             bytemuck::cast_slice(&[raw]));
+    }
+
+    fn update_uniforms(&mut self, game_state: &crate::GameState) {
+        let mut uniforms = Uniforms::new();
+        let view = cgmath::Matrix4::look_to_rh(
+            cgmath::Point3::new(game_state.camera_position.x, game_state.camera_position.y, -0.5), 
+            cgmath::Vector3::new(0., 0., 1.), 
+            cgmath::Vector3::new(0., 1., 0.));
+
+        let window_size = self.window.inner_size();
+        let aspect_ratio = window_size.width as f32 / window_size.height as f32;
+        let ortho_width = game_state.camera_orthographic_height * aspect_ratio;
+        let half_ortho_width = ortho_width * 0.5;
+        let half_ortho_height = game_state.camera_orthographic_height * 0.5;
+        let proj = cgmath::ortho(-half_ortho_width, half_ortho_width, -half_ortho_height, half_ortho_height, -1., 1.);
+        uniforms.view_proj = (OPENGL_TO_WGPU_MATRIX * proj * view).into();
+
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniforms]));
     }
 }
 

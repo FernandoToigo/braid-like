@@ -1,5 +1,6 @@
 mod wgpu_renderer;
 use crate::wgpu_renderer::WgpuRenderer;
+use cgmath::Vector2;
 use futures::executor::block_on;
 use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
@@ -15,8 +16,10 @@ pub struct Game {
 }
 
 pub struct GameState {
-    player_position: cgmath::Vector2<f32>,
     micros_from_start: u128,
+    player_position: cgmath::Vector2<f32>,
+    camera_position: cgmath::Vector2<f32>,
+    camera_orthographic_height: f32,
 }
 
 struct EventResults {
@@ -25,13 +28,15 @@ struct EventResults {
 }
 
 fn main() {
-    let (event_loop, window, renderer) = block_on(WgpuRenderer::init());
+    let (event_loop, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
 
     let game_state = GameState {
-        player_position: cgmath::Vector2::<_>::new(0., 0.),
         micros_from_start: 0,
+        player_position: Vector2::<_>::new(0., 0.),
+        camera_position: Vector2::<_>::new(0., 0.),
+        camera_orthographic_height: 10.,
     };
 
     let mut game = Game {
@@ -43,7 +48,7 @@ fn main() {
     };
 
     event_loop.run(move |event, _, control_flow| {
-        let event_results = read_events(event, &window);
+        let event_results = read_events(event, &game.renderer.window);
 
         let frame_result = match event_results.events_finished {
             true => frame(&mut game),
@@ -161,7 +166,10 @@ fn update(game_state: &mut GameState, delta_micros: u128) {
     let radians_per_micros = radians_per_second / 1e+6;
     let x = (game_state.micros_from_start as f32 * radians_per_micros).cos();
     let y = (game_state.micros_from_start as f32 * radians_per_micros).sin();
-    game_state.player_position = cgmath::Vector2::<_>::new(x, y);
+
+    game_state.player_position.x = x;
+    game_state.camera_position.y = y;
+    game_state.camera_orthographic_height = 10.;
 }
 
 fn render(renderer: &mut WgpuRenderer, game_state: &GameState) -> Result<(), wgpu::SwapChainError> {
