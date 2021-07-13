@@ -18,6 +18,7 @@ pub struct WgpuRenderer {
     pub window: winit::window::Window,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub surface: wgpu::Surface,
     pub swap_chain: wgpu::SwapChain,
     pub render_pipeline: wgpu::RenderPipeline,
     pub uniform_bind_group: wgpu::BindGroup,
@@ -29,7 +30,8 @@ pub struct WgpuRenderer {
     pub depth_texture: Texture,
     pub player_texture: Texture,
     pub sprite_bind_group: wgpu::BindGroup,
-    pub instances: Instances
+    pub instances: Instances,
+    pub sc_desc: wgpu::SwapChainDescriptor,
 }
 
 pub struct Instances {
@@ -398,6 +400,7 @@ impl WgpuRenderer {
              window,
              device,
              queue,
+             surface,
              depth_texture,
              render_pipeline,
              sprite_bind_group,
@@ -410,7 +413,15 @@ impl WgpuRenderer {
              player_texture,
              swap_chain,
              uniform_bind_group,
+             sc_desc
          })
+    }
+
+    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        self.sc_desc.width = new_size.width;
+        self.sc_desc.height = new_size.height;
+        self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
+        self.depth_texture = Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
     }
 
     pub fn render(&mut self, game_state: &crate::GameState) -> Result<(), wgpu::SwapChainError> {

@@ -5,7 +5,6 @@ use futures::executor::block_on;
 use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
-use winit::window::Window;
 
 pub struct Game {
     renderer: WgpuRenderer,
@@ -48,7 +47,7 @@ fn main() {
     };
 
     event_loop.run(move |event, _, control_flow| {
-        let event_results = read_events(event, &game.renderer.window);
+        let event_results = read_events(event, &mut game.renderer);
 
         let frame_result = match event_results.events_finished {
             true => frame(&mut game),
@@ -113,7 +112,7 @@ fn resolve_frame(
     }
 }
 
-fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
+fn read_events<T>(event: Event<'_, T>, renderer: &mut WgpuRenderer) -> EventResults {
     puffin::profile_function!();
 
     let mut event_results = EventResults {
@@ -125,31 +124,29 @@ fn read_events<T>(event: Event<'_, T>, window: &Window) -> EventResults {
         Event::WindowEvent {
             ref event,
             window_id,
-        } if window_id == window.id() => {
-            match event {
-                WindowEvent::CloseRequested => event_results.exit_requested = true,
-                WindowEvent::KeyboardInput { input, .. } => match input {
-                    KeyboardInput {
-                        state: ElementState::Pressed,
-                        virtual_keycode: Some(VirtualKeyCode::Escape),
-                        ..
-                    } => event_results.exit_requested = true,
-                    _ => {}
-                },
-                /*WindowEvent::Resized(physical_size) => {
-                    state.resize(*physical_size);
-                }
-                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    state.resize(**new_inner_size);
-                }*/
+        } if window_id == renderer.window.id() => match event {
+            WindowEvent::CloseRequested => event_results.exit_requested = true,
+            WindowEvent::KeyboardInput { input, .. } => match input {
+                KeyboardInput {
+                    state: ElementState::Pressed,
+                    virtual_keycode: Some(VirtualKeyCode::Escape),
+                    ..
+                } => event_results.exit_requested = true,
                 _ => {}
+            },
+            WindowEvent::Resized(physical_size) => {
+                renderer.resize(*physical_size);
             }
-        }
+            WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
+                renderer.resize(**new_inner_size);
+            }
+            _ => {}
+        },
         Event::MainEventsCleared => {
             // RedrawRequested will only trigger once, unless we manually
             // request it.
             event_results.events_finished = true;
-            window.request_redraw();
+            renderer.window.request_redraw();
         }
         _ => {}
     }
