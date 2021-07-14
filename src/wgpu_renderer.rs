@@ -424,8 +424,8 @@ impl WgpuRenderer {
         self.depth_texture = Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
     }
 
-    pub fn render(&mut self, game_state: &crate::GameState) -> Result<(), wgpu::SwapChainError> {
-        self.update_buffers(&game_state);
+    pub fn render(&mut self, game_state: &crate::GameState, interp_percent: f32) -> Result<(), wgpu::SwapChainError> {
+        self.update_buffers(&game_state, interp_percent);
         self.render_frame()
     }
 
@@ -495,17 +495,18 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    fn update_buffers(&mut self, game_state: &crate::GameState) {
+    fn update_buffers(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         puffin::profile_function!();
 
         //@Performance: only update buffers if the values were changed.
 
-        self.update_instances(&game_state);
+        self.update_instances(&game_state, interp_percent);
         self.update_uniforms(&game_state);
     }
 
-    fn update_instances(&mut self, game_state: &crate::GameState) {
-        self.instances.player.position = game_state.player_position.extend(0.);
+    fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
+        let render_player_position = game_state.previous_player_position + (game_state.player_position - game_state.previous_player_position) * interp_percent;
+        self.instances.player.position = render_player_position.extend(0.);
 
         let raw = self.instances.player.to_raw();
         self.queue.write_buffer(

@@ -6,16 +6,20 @@ use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 
+const UPDATE_INTERVAL_MICROS: u128 = 33333;
+
 pub struct Game {
     renderer: WgpuRenderer,
     start_instant: Instant,
-    last_micros: u128,
+    last_frame_micros: u128,
+    last_update_micros: u128,
     game_state: GameState,
     profiler: puffin_http::Server,
 }
 
 pub struct GameState {
     micros_from_start: u128,
+    previous_player_position: cgmath::Vector2<f32>,
     player_position: cgmath::Vector2<f32>,
     camera_position: cgmath::Vector2<f32>,
     camera_orthographic_height: f32,
@@ -33,6 +37,7 @@ fn main() {
 
     let game_state = GameState {
         micros_from_start: 0,
+        previous_player_position: Vector2::<_>::new(0., 0.),
         player_position: Vector2::<_>::new(0., 0.),
         camera_position: Vector2::<_>::new(0., 0.),
         camera_orthographic_height: 10.,
@@ -41,7 +46,8 @@ fn main() {
     let mut game = Game {
         renderer,
         start_instant: Instant::now(),
-        last_micros: 0,
+        last_frame_micros: 0,
+        last_update_micros: 0,
         game_state,
         profiler,
     };
@@ -59,15 +65,23 @@ fn main() {
 }
 
 fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
+    puffin::profile_function!();
+
     let now_micros = game.start_instant.elapsed().as_micros();
-    let delta_micros = now_micros - game.last_micros;
 
     update_profiler(&game.profiler);
 
-    update(&mut game.game_state, delta_micros);
-    render(&mut game.renderer, &game.game_state)?;
+    while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
+        println!("update");
+        update(&mut game.game_state, UPDATE_INTERVAL_MICROS);
+        game.last_update_micros += UPDATE_INTERVAL_MICROS;
+    }
+    let interp_percent =
+        ((now_micros - game.last_update_micros) as f32) / UPDATE_INTERVAL_MICROS as f32;
+    println!("render ({})", interp_percent);
+    render(&mut game.renderer, &game.game_state, interp_percent)?;
 
-    game.last_micros = now_micros;
+    game.last_frame_micros = now_micros;
 
     Ok(())
 }
@@ -164,12 +178,17 @@ fn update(game_state: &mut GameState, delta_micros: u128) {
     let x = (game_state.micros_from_start as f32 * radians_per_micros).cos();
     let y = (game_state.micros_from_start as f32 * radians_per_micros).sin();
 
+    game_state.previous_player_position = game_state.player_position;
     game_state.player_position.x = x;
-    game_state.camera_position.y = y;
+    //game_state.camera_position.y = y;
     game_state.camera_orthographic_height = 10.;
 }
 
-fn render(renderer: &mut WgpuRenderer, game_state: &GameState) -> Result<(), wgpu::SwapChainError> {
+fn render(
+    renderer: &mut WgpuRenderer,
+    game_state: &GameState,
+    interp_percent: f32,
+) -> Result<(), wgpu::SwapChainError> {
     puffin::profile_function!();
-    renderer.render(&game_state)
+    renderer.render(&game_state, interp_percent)
 }
