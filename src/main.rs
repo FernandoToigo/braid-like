@@ -71,14 +71,13 @@ fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
 
     update_profiler(&game.profiler);
 
+    // TODO: add maximum update steps to recover
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
-        println!("update");
         update(&mut game.game_state, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
     }
     let interp_percent =
         ((now_micros - game.last_update_micros) as f32) / UPDATE_INTERVAL_MICROS as f32;
-    println!("render ({})", interp_percent);
     render(&mut game.renderer, &game.game_state, interp_percent)?;
 
     game.last_frame_micros = now_micros;
@@ -180,7 +179,7 @@ fn update(game_state: &mut GameState, delta_micros: u128) {
 
     game_state.previous_player_position = game_state.player_position;
     game_state.player_position.x = x;
-    //game_state.camera_position.y = y;
+    game_state.player_position.y = y;
     game_state.camera_orthographic_height = 10.;
 }
 

@@ -522,6 +522,7 @@ impl WgpuRenderer {
             cgmath::Vector3::new(0., 0., 1.), 
             cgmath::Vector3::new(0., 1., 0.));
 
+        // TODO: interpolate camera position
         let window_size = self.window.inner_size();
         let aspect_ratio = window_size.width as f32 / window_size.height as f32;
         let ortho_width = game_state.camera_orthographic_height * aspect_ratio;
