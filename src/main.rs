@@ -76,9 +76,7 @@ fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
         update(&mut game.game_state, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
     }
-    let interp_percent =
-        ((now_micros - game.last_update_micros) as f32) / UPDATE_INTERVAL_MICROS as f32;
-    render(&mut game.renderer, &game.game_state, interp_percent)?;
+    render(game, now_micros)?;
 
     game.last_frame_micros = now_micros;
 
@@ -183,11 +181,11 @@ fn update(game_state: &mut GameState, delta_micros: u128) {
     game_state.camera_orthographic_height = 10.;
 }
 
-fn render(
-    renderer: &mut WgpuRenderer,
-    game_state: &GameState,
-    interp_percent: f32,
-) -> Result<(), wgpu::SwapChainError> {
+fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SwapChainError> {
     puffin::profile_function!();
-    renderer.render(&game_state, interp_percent)
+
+    let micros_since_last_updated = (now_micros - game.last_update_micros) as f32;
+    let interp_percent = micros_since_last_updated / UPDATE_INTERVAL_MICROS as f32;
+
+    game.renderer.render(&game.game_state, interp_percent)
 }
