@@ -1,8 +1,9 @@
 ﻿use anyhow::{Result, Error};
 use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
-use cgmath::{Rotation3, SquareMatrix};
+use cgmath::{One, SquareMatrix};
 use image::GenericImageView;
+use cgmath::VectorSpace;
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -70,15 +71,15 @@ struct Uniforms {
 }
 
 const QUAD_VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 1.0] },
-    Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 1.0] },
-    Vertex { position: [0.5, -0.5, 0.0], tex_coords: [1.0, 0.0] },
+    Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 1.0] },
+    Vertex { position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 0.0] },
+    Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 0.0] },
+    Vertex { position: [0.5, -0.5, 0.0], tex_coords: [1.0, 1.0] },
 ];
 
 const QUAD_INDICES: &[u16] = &[
-    0, 1, 2,
-    0, 2, 3,
+    2, 1, 0,
+    2, 0, 3,
 ];
 
 impl Texture {
@@ -344,7 +345,7 @@ impl WgpuRenderer {
                 entry_point: "main",
                 targets: &[wgpu::ColorTargetState {
                     format: sc_desc.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrite::ALL,
                 }],
             }),
@@ -372,7 +373,7 @@ impl WgpuRenderer {
         });
 
         let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
-        let rotation = cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0));
+        let rotation = cgmath::Quaternion::one();
 
         let instances = Instances {
             player: Instance {
@@ -505,7 +506,7 @@ impl WgpuRenderer {
     }
 
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
-        let render_player_position = game_state.previous_player_position + (game_state.player_position - game_state.previous_player_position) * interp_percent;
+        let render_player_position = game_state.previous_player_position.lerp(game_state.player_position, interp_percent);
         self.instances.player.position = render_player_position.extend(0.);
 
         let raw = self.instances.player.to_raw();
@@ -517,10 +518,11 @@ impl WgpuRenderer {
 
     fn update_uniforms(&mut self, game_state: &crate::GameState) {
         let mut uniforms = Uniforms::new();
+        let camera_position = cgmath::Point3::new(game_state.camera_position.x, game_state.camera_position.y, 10.);
         let view = cgmath::Matrix4::look_to_rh(
-            cgmath::Point3::new(game_state.camera_position.x, game_state.camera_position.y, -0.5), 
-            cgmath::Vector3::new(0., 0., 1.), 
-            cgmath::Vector3::new(0., 1., 0.));
+            camera_position, 
+            -cgmath::Vector3::unit_z(), 
+            cgmath::Vector3::unit_y());
 
         // TODO: interpolate camera position
         let window_size = self.window.inner_size();
@@ -528,8 +530,8 @@ impl WgpuRenderer {
         let ortho_width = game_state.camera_orthographic_height * aspect_ratio;
         let half_ortho_width = ortho_width * 0.5;
         let half_ortho_height = game_state.camera_orthographic_height * 0.5;
-        let proj = cgmath::ortho(-half_ortho_width, half_ortho_width, -half_ortho_height, half_ortho_height, -1., 1.);
-        uniforms.view_proj = (OPENGL_TO_WGPU_MATRIX * proj * view).into();
+        let proj = cgmath::ortho(-half_ortho_width, half_ortho_width, -half_ortho_height, half_ortho_height, -1000., 1000.);
+        uniforms.view_proj = (proj * view).into();
 
         self.queue.write_buffer(
             &self.uniform_buffer,
