@@ -54,7 +54,7 @@ pub struct Texture {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex {
-    position: [f32; 3],
+    position: [f32; 2],
     tex_coords: [f32; 2],
 }
 
@@ -71,10 +71,10 @@ struct Uniforms {
 }
 
 const QUAD_VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.5, -0.5, 0.0], tex_coords: [0.0, 1.0] },
-    Vertex { position: [-0.5, 0.5, 0.0], tex_coords: [0.0, 0.0] },
-    Vertex { position: [0.5, 0.5, 0.0], tex_coords: [1.0, 0.0] },
-    Vertex { position: [0.5, -0.5, 0.0], tex_coords: [1.0, 1.0] },
+    Vertex { position: [-0.5, -0.5], tex_coords: [0.0, 1.0] },
+    Vertex { position: [-0.5, 0.5], tex_coords: [0.0, 0.0] },
+    Vertex { position: [0.5, 0.5], tex_coords: [1.0, 0.0] },
+    Vertex { position: [0.5, -0.5], tex_coords: [1.0, 1.0] },
 ];
 
 const QUAD_INDICES: &[u16] = &[
@@ -557,10 +557,10 @@ impl Vertex {
                 wgpu::VertexAttribute {
                     offset: 0,
                     shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
+                    format: wgpu::VertexFormat::Float32x2,
                 },
                 wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
                 }],
