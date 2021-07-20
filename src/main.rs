@@ -1,4 +1,6 @@
+mod physics;
 mod wgpu_renderer;
+use crate::physics::{init_physics, Physics};
 use crate::wgpu_renderer::WgpuRenderer;
 use cgmath::Vector2;
 use futures::executor::block_on;
@@ -10,6 +12,7 @@ const UPDATE_INTERVAL_MICROS: u128 = 33333;
 
 pub struct Game {
     renderer: WgpuRenderer,
+    physics: Physics,
     start_instant: Instant,
     last_frame_micros: u128,
     last_update_micros: u128,
@@ -34,17 +37,19 @@ fn main() {
     let (event_loop, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
+    let physics = init_physics(UPDATE_INTERVAL_MICROS);
 
     let game_state = GameState {
         micros_from_start: 0,
-        previous_player_position: Vector2::<_>::new(0., 0.),
-        player_position: Vector2::<_>::new(0., 0.),
-        camera_position: Vector2::<_>::new(0., 0.),
+        previous_player_position: Vector2::new(0., 0.),
+        player_position: Vector2::new(0., 0.),
+        camera_position: Vector2::new(0., 0.),
         camera_orthographic_height: 10.,
     };
 
     let mut game = Game {
         renderer,
+        physics,
         start_instant: Instant::now(),
         last_frame_micros: 0,
         last_update_micros: 0,
@@ -73,7 +78,7 @@ fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
 
     // TODO: add maximum update steps to recover
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
-        update(&mut game.game_state, UPDATE_INTERVAL_MICROS);
+        update(game, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
     }
     render(game, now_micros)?;
@@ -165,20 +170,22 @@ fn read_events<T>(event: Event<'_, T>, renderer: &mut WgpuRenderer) -> EventResu
     event_results
 }
 
-fn update(game_state: &mut GameState, delta_micros: u128) {
+fn update(game: &mut Game, delta_micros: u128) {
     puffin::profile_function!();
 
-    game_state.micros_from_start += delta_micros;
+    game.game_state.micros_from_start += delta_micros;
 
     let radians_per_second = std::f32::consts::PI * 0.5;
     let radians_per_micros = radians_per_second / 1e+6;
-    let x = (game_state.micros_from_start as f32 * radians_per_micros).cos();
-    let y = (game_state.micros_from_start as f32 * radians_per_micros).sin();
+    let x = (game.game_state.micros_from_start as f32 * radians_per_micros).cos();
+    let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
 
-    game_state.previous_player_position = game_state.player_position;
-    game_state.player_position.x = x;
-    game_state.player_position.y = y;
-    game_state.camera_orthographic_height = 10.;
+    game.game_state.previous_player_position = game.game_state.player_position;
+    game.game_state.player_position.x = x;
+    game.game_state.player_position.y = y;
+    game.game_state.camera_orthographic_height = 10.;
+
+    game.physics.run_frame();
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SwapChainError> {

@@ -16,6 +16,7 @@ bytemuck = { version = "1.4", features = [ "derive" ] }
 futures = "0.3"
 puffin = "0.6.0"
 puffin_http = "0.3.0"
+rapier2d = "0.10.1"
 
 [build-dependencies]
 anyhow = "1.0"
