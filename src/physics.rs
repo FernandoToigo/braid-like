@@ -1,8 +1,8 @@
 use rapier2d::prelude::*;
 
 pub struct Physics {
-    rigid_bodies: RigidBodySet,
-    colliders: ColliderSet,
+    pub rigid_bodies: RigidBodySet,
+    pub colliders: ColliderSet,
     gravity: Vector<f32>,
     integration_parameters: IntegrationParameters,
     pipeline: PhysicsPipeline,

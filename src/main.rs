@@ -4,6 +4,7 @@ use crate::physics::{init_physics, Physics};
 use crate::wgpu_renderer::WgpuRenderer;
 use cgmath::Vector2;
 use futures::executor::block_on;
+use rapier2d::prelude::*;
 use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
@@ -24,6 +25,7 @@ pub struct GameState {
     micros_from_start: u128,
     previous_player_position: cgmath::Vector2<f32>,
     player_position: cgmath::Vector2<f32>,
+    player_rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
     camera_position: cgmath::Vector2<f32>,
     camera_orthographic_height: f32,
 }
@@ -37,12 +39,28 @@ fn main() {
     let (event_loop, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
-    let physics = init_physics(UPDATE_INTERVAL_MICROS);
+    let mut physics = init_physics(UPDATE_INTERVAL_MICROS);
+
+    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic().build();
+    let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
+
+    let collider = ColliderBuilder::ball(0.5).restitution(0.7).build();
+    physics.colliders.insert_with_parent(
+        collider,
+        player_rigid_body_handle,
+        &mut physics.rigid_bodies,
+    );
+
+    let collider = ColliderBuilder::cuboid(100.0, 0.1)
+        .translation(vector!(0.0, -2.0))
+        .build();
+    physics.colliders.insert(collider);
 
     let game_state = GameState {
         micros_from_start: 0,
         previous_player_position: Vector2::new(0., 0.),
         player_position: Vector2::new(0., 0.),
+        player_rigid_body_handle,
         camera_position: Vector2::new(0., 0.),
         camera_orthographic_height: 10.,
     };
@@ -181,11 +199,16 @@ fn update(game: &mut Game, delta_micros: u128) {
     let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
 
     game.game_state.previous_player_position = game.game_state.player_position;
-    game.game_state.player_position.x = x;
-    game.game_state.player_position.y = y;
+    //game.game_state.player_position.x = x;
+    //game.game_state.player_position.y = y;
     game.game_state.camera_orthographic_height = 10.;
 
     game.physics.run_frame();
+
+    let player_rigid_body = &game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
+    let player_position_from_physics = player_rigid_body.translation();
+    game.game_state.player_position.x = player_position_from_physics.x;
+    game.game_state.player_position.y = player_position_from_physics.y;
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SwapChainError> {
