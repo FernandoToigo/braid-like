@@ -1,13 +1,14 @@
 #version 450
 
-layout(location=0) in vec2 v_tex_coords;
-layout(location=0) out vec4 f_color;
+#extension GL_EXT_nonuniform_qualifier : require
 
-layout(set = 0, binding = 0) uniform texture2D t_diffuse;
-layout(set = 0, binding = 1) uniform sampler s_diffuse;
+layout(location = 0) in vec2 v_TexCoord;
+layout(location = 1) nonuniformEXT flat in int v_Index;  // dynamically non-uniform
+layout(location = 0) out vec4 o_Color;
+
+layout(set = 0, binding = 0) uniform texture2D u_Textures[];
+layout(set = 0, binding = 1) uniform sampler u_Sampler;
 
 void main() {
-    f_color = texture(sampler2D(t_diffuse, s_diffuse), v_tex_coords);
-    //f_color = vec4(v_tex_coords, 0.0, 1.0);
-    //f_color = vec4(1.0, 0.0, 0.0, 1.0);
+    o_Color = vec4(texture(sampler2D(u_Textures[v_Index], u_Sampler), v_TexCoord));
 }

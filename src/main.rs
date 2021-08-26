@@ -28,6 +28,8 @@ pub struct GameState {
     player_rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
     camera_position: cgmath::Vector2<f32>,
     camera_orthographic_height: f32,
+    ground_position: cgmath::Vector2<f32>,
+    ground_scale: cgmath::Vector2<f32>,
 }
 
 struct EventResults {
@@ -36,6 +38,7 @@ struct EventResults {
 }
 
 fn main() {
+    env_logger::init();
     let (event_loop, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
@@ -51,8 +54,10 @@ fn main() {
         &mut physics.rigid_bodies,
     );
 
-    let collider = ColliderBuilder::cuboid(100.0, 0.1)
-        .translation(vector!(0.0, -2.0))
+    let ground_position = Vector2::new(0.0, -2.0);
+    let ground_scale = cgmath::Vector2::new(2.0, 1.0);
+    let collider = ColliderBuilder::cuboid(ground_scale.x * 0.5, ground_scale.y * 0.5)
+        .translation(vector!(ground_position.x, ground_position.y))
         .build();
     physics.colliders.insert(collider);
 
@@ -63,6 +68,8 @@ fn main() {
         player_rigid_body_handle,
         camera_position: Vector2::new(0., 0.),
         camera_orthographic_height: 10.,
+        ground_position,
+        ground_scale,
     };
 
     let mut game = Game {
@@ -87,7 +94,7 @@ fn main() {
     });
 }
 
-fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SwapChainError> {
+fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
     let now_micros = game.start_instant.elapsed().as_micros();
@@ -126,7 +133,7 @@ fn update_profiler(puffin_server: &puffin_http::Server) {
 
 fn resolve_frame(
     event_handling: &EventResults,
-    render_result: Result<(), wgpu::SwapChainError>,
+    render_result: Result<(), wgpu::SurfaceError>,
 ) -> ControlFlow {
     puffin::profile_function!();
 
@@ -136,7 +143,7 @@ fn resolve_frame(
             Ok(_) => ControlFlow::Poll,
             // Recreate the swap_chain if lost
             //Err(wgpu::SwapChainError::Lost) => state.resize(state.size),
-            Err(wgpu::SwapChainError::OutOfMemory) => ControlFlow::Exit,
+            Err(wgpu::SurfaceError::OutOfMemory) => ControlFlow::Exit,
             Err(e) => {
                 // All other errors (Outdated, Timeout) should be resolved by the next frame
                 eprintln!("Unexpected error: {:?}", e);
@@ -211,7 +218,7 @@ fn update(game: &mut Game, delta_micros: u128) {
     game.game_state.player_position.y = player_position_from_physics.y;
 }
 
-fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SwapChainError> {
+fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
     let micros_since_last_updated = (now_micros - game.last_update_micros) as f32;

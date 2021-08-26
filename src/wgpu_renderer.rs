@@ -20,7 +20,6 @@ pub struct WgpuRenderer {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface: wgpu::Surface,
-    pub swap_chain: wgpu::SwapChain,
     pub render_pipeline: wgpu::RenderPipeline,
     pub uniform_bind_group: wgpu::BindGroup,
     pub uniform_buffer: wgpu::Buffer,
@@ -29,20 +28,22 @@ pub struct WgpuRenderer {
     pub instance_buffer: wgpu::Buffer,
     pub num_indices: u32,
     pub depth_texture: Texture,
-    pub player_texture: Texture,
-    pub sprite_bind_group: wgpu::BindGroup,
+    pub textures_bind_group: wgpu::BindGroup,
     pub instances: Instances,
-    pub sc_desc: wgpu::SwapChainDescriptor,
+    pub surface_config: wgpu::SurfaceConfiguration,
 }
 
 pub struct Instances {
     player: Instance,
+    ground: Instance,
     count: u32,
 }
 
 pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
+    scale: cgmath::Vector3<f32>,
+    index: u32,
 }
 
 pub struct Texture {
@@ -62,6 +63,7 @@ struct Vertex {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
+    index: u32
 }
 
 #[repr(C)]
@@ -115,7 +117,7 @@ impl Texture {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsage::SAMPLED | wgpu::TextureUsage::COPY_DST,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             }
         );
 
@@ -124,6 +126,7 @@ impl Texture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All
             },
             &rgba,
             wgpu::ImageDataLayout {
@@ -152,7 +155,7 @@ impl Texture {
 
     fn create_depth_texture(
         device: &wgpu::Device,
-        sc_desc: &wgpu::SwapChainDescriptor,
+        sc_desc: &wgpu::SurfaceConfiguration,
         label: &str,
     ) -> Self {
         let size = wgpu::Extent3d {
@@ -167,7 +170,7 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT | wgpu::TextureUsage::SAMPLED,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         };
         let texture = device.create_texture(&desc);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -201,7 +204,7 @@ impl WgpuRenderer {
             .unwrap();
         let size = window.inner_size();
 
-        let instance = wgpu::Instance::new(wgpu::BackendBit::PRIMARY);
+        let instance = wgpu::Instance::new(wgpu::Backends::PRIMARY);
         let surface = unsafe { instance.create_surface(&window) };
         let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -210,45 +213,54 @@ impl WgpuRenderer {
         ).await.unwrap();
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
-            features: wgpu::Features::empty(),
-            limits: wgpu::Limits::default(),
+            features: wgpu::Features::UNSIZED_BINDING_ARRAY
+            | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
+            | wgpu::Features::PUSH_CONSTANTS | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+
+,
+            limits: wgpu::Limits {
+                max_push_constant_size: 4,
+                ..wgpu::Limits::default()
+            },
             label: Some("Device"),
         }, None).await.unwrap();
 
-        let sc_desc = wgpu::SwapChainDescriptor {
-            usage: wgpu::TextureUsage::RENDER_ATTACHMENT,
-            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            //format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            format: surface.get_preferred_format(&adapter).unwrap(),
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
         };
+        surface.configure(&device, &surface_config);
 
         let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Quad Vertex Buffer"),
             contents: bytemuck::cast_slice(QUAD_VERTICES),
-            usage: wgpu::BufferUsage::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX,
         });
         let quad_index_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Quad Index Buffer"),
                 contents: bytemuck::cast_slice(QUAD_INDICES),
-                usage: wgpu::BufferUsage::INDEX, });
+                usage: wgpu::BufferUsages::INDEX, });
         let texture_bind_group_layout = device.create_bind_group_layout(
             &wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
                             view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
-                        count: None,
+                        count: NonZeroU32::new(2),
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStage::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler {
                             comparison: false,
                             filtering: true,
@@ -262,14 +274,18 @@ impl WgpuRenderer {
 
         let player_texture_bytes = include_bytes!("..\\res\\sprites\\player.png");
         let player_texture = Texture::from_bytes(&device, &queue, player_texture_bytes, "Player").unwrap();
+        let ground_texture_bytes = include_bytes!("..\\res\\sprites\\Ground.png");
+        let ground_texture = Texture::from_bytes(&device, &queue, ground_texture_bytes, "Ground").unwrap();
 
-        let sprite_bind_group = device.create_bind_group(
+        let textures_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
                 layout: &texture_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&player_texture.view),
+                        resource: wgpu::BindingResource::TextureViewArray(&[
+                            &player_texture.view,
+                            &ground_texture.view,]),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -280,13 +296,13 @@ impl WgpuRenderer {
             }
         );
 
-        let depth_texture = Texture::create_depth_texture(&device, &sc_desc, "depth_texture");
+        let depth_texture = Texture::create_depth_texture(&device, &surface_config, "depth_texture");
 
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStage::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -305,7 +321,7 @@ impl WgpuRenderer {
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
-            usage: wgpu::BufferUsage::UNIFORM | wgpu::BufferUsage::COPY_DST,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -324,11 +340,14 @@ impl WgpuRenderer {
                     &texture_bind_group_layout,
                     &uniform_bind_group_layout
                 ],
-                push_constant_ranges: &[],
+                push_constant_ranges: &[wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::FRAGMENT,
+                    range: 0..4
+                }],
             });
 
         let vs_module = device.create_shader_module(&wgpu::include_spirv!("..\\res\\shaders\\sprite.vert.spv"));
-        let fs_module = device.create_shader_module(&wgpu::include_spirv!("..\\res\\shaders\\sprite.frag.spv"));
+        let fs_module = unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!("..\\res\\shaders\\sprite.frag.spv")) };
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
@@ -344,9 +363,9 @@ impl WgpuRenderer {
                 module: &fs_module,
                 entry_point: "main",
                 targets: &[wgpu::ColorTargetState {
-                    format: sc_desc.format,
+                    format: surface_config.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrite::ALL,
+                    write_mask: wgpu::ColorWrites::ALL,
                 }],
             }),
             primitive: wgpu::PrimitiveState {
@@ -374,27 +393,35 @@ impl WgpuRenderer {
 
         let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
         let rotation = cgmath::Quaternion::one();
+        let scale = cgmath::Vector3::new(1.0, 1.0, 1.0);
 
         let instances = Instances {
             player: Instance {
                 position,
                 rotation,
+                scale,
+                index: 0,
             },
-            count: 1
+            ground: Instance {
+                position,
+                rotation,
+                scale,
+                index: 1,
+            },
+            count: 2
         };
 
-        let instances_vec = vec![&instances.player];
+        let instances_vec = vec![&instances.player, &instances.ground];
         let instance_data = instances_vec.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
                 contents: bytemuck::cast_slice(&instance_data),
-                usage: wgpu::BufferUsage::VERTEX | wgpu::BufferUsage::COPY_DST,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
 
         let num_indices = QUAD_INDICES.len() as u32;
-        let swap_chain = device.create_swap_chain(&surface, &sc_desc);
 
         (event_loop,
          Self {
@@ -404,39 +431,36 @@ impl WgpuRenderer {
              surface,
              depth_texture,
              render_pipeline,
-             sprite_bind_group,
+             textures_bind_group,
              uniform_buffer,
              quad_index_buffer,
              quad_vertex_buffer,
              instance_buffer,
              instances,
              num_indices,
-             player_texture,
-             swap_chain,
              uniform_bind_group,
-             sc_desc
+             surface_config
          })
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        self.sc_desc.width = new_size.width;
-        self.sc_desc.height = new_size.height;
-        self.swap_chain = self.device.create_swap_chain(&self.surface, &self.sc_desc);
-        self.depth_texture = Texture::create_depth_texture(&self.device, &self.sc_desc, "depth_texture");
+        self.surface_config.width = new_size.width;
+        self.surface_config.height = new_size.height;
+        self.depth_texture = Texture::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
     }
 
-    pub fn render(&mut self, game_state: &crate::GameState, interp_percent: f32) -> Result<(), wgpu::SwapChainError> {
+    pub fn render(&mut self, game_state: &crate::GameState, interp_percent: f32) -> Result<(), wgpu::SurfaceError> {
         self.update_buffers(&game_state, interp_percent);
         self.render_frame()
     }
 
-    fn render_frame(&self) -> Result<(), wgpu::SwapChainError> {
+    fn render_frame(&self) -> Result<(), wgpu::SurfaceError> {
         puffin::profile_function!();
 
         let frame = {
             puffin::profile_scope!("get current frame");
             self
-                .swap_chain
+                .surface
                 .get_current_frame()?
                 .output
         };
@@ -450,11 +474,12 @@ impl WgpuRenderer {
 
         {
             puffin::profile_scope!("create render_pass");
+            let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[
                     wgpu::RenderPassColorAttachment {
-                        view: &frame.view,
+                        view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -481,7 +506,7 @@ impl WgpuRenderer {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.set_bind_group(0, &self.sprite_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.textures_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.count as _);
         }
@@ -499,7 +524,7 @@ impl WgpuRenderer {
     fn update_buffers(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         puffin::profile_function!();
 
-        //@Performance: only update buffers if the values were changed.
+        // @Performance: only update buffers if the values were changed.
 
         self.update_instances(&game_state, interp_percent);
         self.update_uniforms(&game_state);
@@ -508,12 +533,15 @@ impl WgpuRenderer {
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         let render_player_position = game_state.previous_player_position.lerp(game_state.player_position, interp_percent);
         self.instances.player.position = render_player_position.extend(0.);
+        self.instances.ground.position = game_state.ground_position.extend(0.);
+        self.instances.ground.scale = game_state.ground_scale.extend(0.);
 
-        let raw = self.instances.player.to_raw();
+        let instances_vec = vec![&self.instances.player, &self.instances.ground];
+        let instance_data = instances_vec.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
-            bytemuck::cast_slice(&[raw]));
+            bytemuck::cast_slice(&instance_data));
     }
 
     fn update_uniforms(&mut self, game_state: &crate::GameState) {
@@ -552,7 +580,7 @@ impl Vertex {
     fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::InputStepMode::Vertex,
+            step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &[
                 wgpu::VertexAttribute {
                     offset: 0,
@@ -563,6 +591,11 @@ impl Vertex {
                     offset: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
+                },
+                wgpu::VertexAttribute {
+                    offset: std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Sint32,
                 }],
         }
     }
@@ -576,7 +609,7 @@ impl InstanceRaw {
             // We need to switch from using a step mode of Vertex to Instance
             // This means that our shaders will only change to use the next
             // instance when the shader starts processing a new instance
-            step_mode: wgpu::InputStepMode::Instance,
+            step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
                 wgpu::VertexAttribute {
                     offset: 0,
@@ -601,6 +634,11 @@ impl InstanceRaw {
                     offset: mem::size_of::<[f32; 12]>() as wgpu::BufferAddress,
                     shader_location: 8,
                     format: wgpu::VertexFormat::Float32x4,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Sint32,
                 }
             ],
         }
@@ -611,7 +649,9 @@ impl Instance {
     fn to_raw(&self) -> InstanceRaw {
         InstanceRaw {
             model: (cgmath::Matrix4::from_translation(self.position) *
-                cgmath::Matrix4::from(self.rotation)).into()
+                cgmath::Matrix4::from(self.rotation) * 
+                cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)).into(),
+            index: self.index
         }
     }
 }
