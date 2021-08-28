@@ -82,11 +82,16 @@ fn main() {
         profiler,
     };
 
+    let mut input = Input {
+        left: false,
+        right: false,
+    };
+
     event_loop.run(move |event, _, control_flow| {
-        let event_results = read_events(event, &mut game.renderer);
+        let event_results = read_events(event, &mut game.renderer, &mut input);
 
         let frame_result = match event_results.events_finished {
-            true => frame(&mut game),
+            true => frame(&mut game, &mut input),
             false => Ok(()),
         };
 
@@ -94,17 +99,24 @@ fn main() {
     });
 }
 
-fn frame(game: &mut Game) -> anyhow::Result<(), wgpu::SurfaceError> {
+struct Input {
+    right: bool,
+    left: bool,
+}
+
+fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
     let now_micros = game.start_instant.elapsed().as_micros();
 
     update_profiler(&game.profiler);
 
-    // TODO: add maximum update steps to recover
+    // @Incomplete: add maximum update steps to recover per frame.
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
-        update(game, UPDATE_INTERVAL_MICROS);
+        update(game, &input, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
+        input.left = false;
+        input.right = false;
     }
     render(game, now_micros)?;
 
@@ -153,7 +165,11 @@ fn resolve_frame(
     }
 }
 
-fn read_events<T>(event: Event<'_, T>, renderer: &mut WgpuRenderer) -> EventResults {
+fn read_events<T>(
+    event: Event<'_, T>,
+    renderer: &mut WgpuRenderer,
+    input: &mut Input,
+) -> EventResults {
     puffin::profile_function!();
 
     let mut event_results = EventResults {
@@ -167,12 +183,25 @@ fn read_events<T>(event: Event<'_, T>, renderer: &mut WgpuRenderer) -> EventResu
             window_id,
         } if window_id == renderer.window.id() => match event {
             WindowEvent::CloseRequested => event_results.exit_requested = true,
-            WindowEvent::KeyboardInput { input, .. } => match input {
+            WindowEvent::KeyboardInput {
+                input: keyboard_input,
+                ..
+            } => match keyboard_input {
                 KeyboardInput {
                     state: ElementState::Pressed,
                     virtual_keycode: Some(VirtualKeyCode::Escape),
                     ..
                 } => event_results.exit_requested = true,
+                KeyboardInput {
+                    state: ElementState::Pressed,
+                    virtual_keycode: Some(VirtualKeyCode::A),
+                    ..
+                } => input.left = true,
+                KeyboardInput {
+                    state: ElementState::Pressed,
+                    virtual_keycode: Some(VirtualKeyCode::D),
+                    ..
+                } => input.right = true,
                 _ => {}
             },
             WindowEvent::Resized(physical_size) => {
@@ -195,21 +224,40 @@ fn read_events<T>(event: Event<'_, T>, renderer: &mut WgpuRenderer) -> EventResu
     event_results
 }
 
-fn update(game: &mut Game, delta_micros: u128) {
+fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     puffin::profile_function!();
 
     game.game_state.micros_from_start += delta_micros;
 
-    let radians_per_second = std::f32::consts::PI * 0.5;
-    let radians_per_micros = radians_per_second / 1e+6;
-    let x = (game.game_state.micros_from_start as f32 * radians_per_micros).cos();
-    let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
+    //let radians_per_second = std::f32::consts::PI * 0.5;
+    //let radians_per_micros = radians_per_second / 1e+6;
+    //let x = (game.game_state.micros_from_start as f32 * radians_per_micros).cos();
+    //let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
 
-    game.game_state.previous_player_position = game.game_state.player_position;
-    //game.game_state.player_position.x = x;
-    //game.game_state.player_position.y = y;
+    update_camera(game);
+    update_player(game, input);
+    update_physics(game);
+}
+
+fn update_camera(game: &mut Game) {
     game.game_state.camera_orthographic_height = 10.;
+}
 
+fn update_player(game: &mut Game, input: &Input) {
+    game.game_state.previous_player_position = game.game_state.player_position;
+    if input.left {
+        let player_rigid_body =
+            &mut game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
+        player_rigid_body.apply_force(vector![-1.0, 0.0], true);
+    }
+    if input.right {
+        let player_rigid_body =
+            &mut game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
+        player_rigid_body.apply_force(vector![1.0, 0.0], true);
+    }
+}
+
+fn update_physics(game: &mut Game) {
     game.physics.run_frame();
 
     let player_rigid_body = &game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
