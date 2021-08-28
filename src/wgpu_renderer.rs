@@ -34,16 +34,16 @@ pub struct WgpuRenderer {
 }
 
 pub struct Instances {
-    player: Instance,
-    ground: Instance,
+    list: Box<[Instance]>,
     count: u32,
 }
 
+#[derive(Clone)]
 pub struct Instance {
     position: cgmath::Vector3<f32>,
     rotation: cgmath::Quaternion<f32>,
     scale: cgmath::Vector3<f32>,
-    index: u32,
+    texture_index: u32,
 }
 
 pub struct Texture {
@@ -63,7 +63,7 @@ struct Vertex {
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
-    index: u32
+    texture_index: u32
 }
 
 #[repr(C)]
@@ -143,7 +143,7 @@ impl Texture {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
+                mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
@@ -215,13 +215,10 @@ impl WgpuRenderer {
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             features: wgpu::Features::UNSIZED_BINDING_ARRAY
             | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-            | wgpu::Features::PUSH_CONSTANTS | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+            | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH
 
 ,
-            limits: wgpu::Limits {
-                max_push_constant_size: 4,
-                ..wgpu::Limits::default()
-            },
+            limits: wgpu::Limits::default(),
             label: Some("Device"),
         }, None).await.unwrap();
 
@@ -256,7 +253,7 @@ impl WgpuRenderer {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
-                        count: NonZeroU32::new(2),
+                        count: NonZeroU32::new(3),
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
@@ -276,6 +273,8 @@ impl WgpuRenderer {
         let player_texture = Texture::from_bytes(&device, &queue, player_texture_bytes, "Player").unwrap();
         let ground_texture_bytes = include_bytes!("..\\res\\sprites\\Ground.png");
         let ground_texture = Texture::from_bytes(&device, &queue, ground_texture_bytes, "Ground").unwrap();
+        let cat_texture_bytes = include_bytes!("..\\res\\sprites\\Cat.png");
+        let cat_texture= Texture::from_bytes(&device, &queue, cat_texture_bytes, "Cat").unwrap();
 
         let textures_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
@@ -285,7 +284,8 @@ impl WgpuRenderer {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureViewArray(&[
                             &player_texture.view,
-                            &ground_texture.view,]),
+                            &ground_texture.view,
+                            &cat_texture.view]),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
@@ -340,10 +340,7 @@ impl WgpuRenderer {
                     &texture_bind_group_layout,
                     &uniform_bind_group_layout
                 ],
-                push_constant_ranges: &[wgpu::PushConstantRange {
-                    stages: wgpu::ShaderStages::FRAGMENT,
-                    range: 0..4
-                }],
+                push_constant_ranges: &[],
             });
 
         let vs_module = device.create_shader_module(&wgpu::include_spirv!("..\\res\\shaders\\sprite.vert.spv"));
@@ -394,25 +391,31 @@ impl WgpuRenderer {
         let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
         let rotation = cgmath::Quaternion::one();
         let scale = cgmath::Vector3::new(1.0, 1.0, 1.0);
-
-        let instances = Instances {
-            player: Instance {
-                position,
-                rotation,
-                scale,
-                index: 0,
-            },
-            ground: Instance {
-                position,
-                rotation,
-                scale,
-                index: 1,
-            },
-            count: 2
+        let player = Instance {
+            position,
+            rotation,
+            scale,
+            texture_index: 0,
+        };
+        let ground = Instance {
+            position,
+            rotation,
+            scale,
+            texture_index: 1,
+        };
+        let cat = Instance {
+            position,
+            rotation,
+            scale,
+            texture_index: 2
         };
 
-        let instances_vec = vec![&instances.player, &instances.ground];
-        let instance_data = instances_vec.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instances = Instances {
+            list: Box::new([player, ground, cat]),
+            count: 3
+        };
+
+        let instance_data = instances.list.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
@@ -525,19 +528,17 @@ impl WgpuRenderer {
         puffin::profile_function!();
 
         // @Performance: only update buffers if the values were changed.
-
         self.update_instances(&game_state, interp_percent);
         self.update_uniforms(&game_state);
     }
 
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         let render_player_position = game_state.previous_player_position.lerp(game_state.player_position, interp_percent);
-        self.instances.player.position = render_player_position.extend(0.);
-        self.instances.ground.position = game_state.ground_position.extend(0.);
-        self.instances.ground.scale = game_state.ground_scale.extend(0.);
+        self.instances.list[0].position = render_player_position.extend(-1.);
+        self.instances.list[1].position = game_state.ground_position.extend(0.);
+        self.instances.list[1].scale = game_state.ground_scale.extend(0.);
 
-        let instances_vec = vec![&self.instances.player, &self.instances.ground];
-        let instance_data = instances_vec.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = self.instances.list.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
@@ -552,7 +553,7 @@ impl WgpuRenderer {
             -cgmath::Vector3::unit_z(), 
             cgmath::Vector3::unit_y());
 
-        // TODO: interpolate camera position
+        // @Incomplete: interpolate camera position.
         let window_size = self.window.inner_size();
         let aspect_ratio = window_size.width as f32 / window_size.height as f32;
         let ortho_width = game_state.camera_orthographic_height * aspect_ratio;
@@ -651,7 +652,7 @@ impl Instance {
             model: (cgmath::Matrix4::from_translation(self.position) *
                 cgmath::Matrix4::from(self.rotation) * 
                 cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)).into(),
-            index: self.index
+            texture_index: self.texture_index
         }
     }
 }
