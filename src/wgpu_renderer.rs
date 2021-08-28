@@ -529,11 +529,11 @@ impl WgpuRenderer {
 
         // @Performance: only update buffers if the values were changed.
         self.update_instances(&game_state, interp_percent);
-        self.update_uniforms(&game_state);
+        self.update_uniforms(&game_state, interp_percent);
     }
 
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
-        let render_player_position = game_state.previous_player_position.lerp(game_state.player_position, interp_percent);
+        let render_player_position = game_state.player_position_previous.lerp(game_state.player_position, interp_percent);
         self.instances.list[0].position = render_player_position.extend(-1.);
         self.instances.list[1].position = game_state.ground_position.extend(0.);
         self.instances.list[1].scale = game_state.ground_scale.extend(0.);
@@ -545,9 +545,10 @@ impl WgpuRenderer {
             bytemuck::cast_slice(&instance_data));
     }
 
-    fn update_uniforms(&mut self, game_state: &crate::GameState) {
+    fn update_uniforms(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         let mut uniforms = Uniforms::new();
-        let camera_position = cgmath::Point3::new(game_state.camera_position.x, game_state.camera_position.y, 10.);
+        let render_camera_position = game_state.camera_position_previous.lerp(game_state.camera_position, interp_percent);
+        let camera_position = cgmath::Point3::new(render_camera_position.x, render_camera_position.y, 10.);
         let view = cgmath::Matrix4::look_to_rh(
             camera_position, 
             -cgmath::Vector3::unit_z(), 

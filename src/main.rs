@@ -23,9 +23,10 @@ pub struct Game {
 
 pub struct GameState {
     micros_from_start: u128,
-    previous_player_position: cgmath::Vector2<f32>,
+    player_position_previous: cgmath::Vector2<f32>,
     player_position: cgmath::Vector2<f32>,
     player_rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
+    camera_position_previous: cgmath::Vector2<f32>,
     camera_position: cgmath::Vector2<f32>,
     camera_orthographic_height: f32,
     ground_position: cgmath::Vector2<f32>,
@@ -63,9 +64,10 @@ fn main() {
 
     let game_state = GameState {
         micros_from_start: 0,
-        previous_player_position: Vector2::new(0., 0.),
+        player_position_previous: Vector2::new(0., 0.),
         player_position: Vector2::new(0., 0.),
         player_rigid_body_handle,
+        camera_position_previous: Vector2::new(0., 0.),
         camera_position: Vector2::new(0., 0.),
         camera_orthographic_height: 10.,
         ground_position,
@@ -234,17 +236,19 @@ fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     //let x = (game.game_state.micros_from_start as f32 * radians_per_micros).cos();
     //let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
 
-    update_camera(game);
     update_player(game, input);
     update_physics(game);
+    update_camera(game);
 }
 
 fn update_camera(game: &mut Game) {
     game.game_state.camera_orthographic_height = 10.;
+    game.game_state.camera_position_previous = game.game_state.camera_position;
+    game.game_state.camera_position = game.game_state.player_position;
 }
 
 fn update_player(game: &mut Game, input: &Input) {
-    game.game_state.previous_player_position = game.game_state.player_position;
+    game.game_state.player_position_previous = game.game_state.player_position;
     if input.left {
         let player_rigid_body =
             &mut game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
