@@ -10,6 +10,7 @@ use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEve
 use winit::event_loop::ControlFlow;
 
 const UPDATE_INTERVAL_MICROS: u128 = 33333;
+const MAXIMUM_UPDATE_STEPS_PER_FRAME: u32 = 10;
 
 pub struct Game {
     renderer: WgpuRenderer,
@@ -113,12 +114,17 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
 
     update_profiler(&game.profiler);
 
-    // @Incomplete: add maximum update steps to recover per frame.
+    let mut update_count = 0;
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
         update(game, &input, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
         input.left = false;
         input.right = false;
+        update_count += 1;
+        if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
+            println!("WARNING. Game is slowing down.");
+            break;
+        }
     }
     render(game, now_micros)?;
 
