@@ -11,6 +11,7 @@ pub struct Physics {
     narrow_phase: NarrowPhase,
     joints: JointSet,
     ccd_solver: CCDSolver,
+    query_pipeline: QueryPipeline,
 }
 
 pub fn init_physics(time_step_micros: u128) -> Physics {
@@ -26,6 +27,7 @@ pub fn init_physics(time_step_micros: u128) -> Physics {
     let narrow_phase = NarrowPhase::new();
     let joints = JointSet::new();
     let ccd_solver = CCDSolver::new();
+    let query_pipeline = QueryPipeline::new();
 
     Physics {
         rigid_bodies,
@@ -38,6 +40,7 @@ pub fn init_physics(time_step_micros: u128) -> Physics {
         narrow_phase,
         joints,
         ccd_solver,
+        query_pipeline,
     }
 }
 
@@ -59,5 +62,17 @@ impl Physics {
             &physics_hooks,
             &event_handler,
         );
+    }
+
+    pub fn cast_ray(
+        &mut self,
+        ray: Ray,
+        max_toi: Real,
+        groups: InteractionGroups,
+    ) -> Option<(ColliderHandle, Real)> {
+        self.query_pipeline
+            .update(&self.island_manager, &self.rigid_bodies, &self.colliders);
+        self.query_pipeline
+            .cast_ray(&self.colliders, &ray, max_toi, true, groups, None)
     }
 }

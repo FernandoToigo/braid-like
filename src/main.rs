@@ -111,7 +111,10 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
     let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic().build();
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
-    let collider = ColliderBuilder::cuboid(0.5, 0.5).restitution(0.7).build();
+    let collider = ColliderBuilder::cuboid(0.5, 0.5)
+        .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
+        .restitution(0.7)
+        .build();
     physics.colliders.insert_with_parent(
         collider,
         player_rigid_body_handle,
@@ -123,6 +126,7 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
         .map(|wall| {
             ColliderBuilder::cuboid(wall.size.x * 0.5, wall.size.y * 0.5)
                 .translation(vector!(wall.position.x, wall.position.y))
+                .collision_groups(InteractionGroups::new(0b10, 0xFFFF))
                 .build()
         })
         .for_each(|collider| {
@@ -271,7 +275,7 @@ fn read_events<T>(
                     state: ElementState::Pressed,
                     virtual_keycode: Some(VirtualKeyCode::D),
                     ..
-                } => input.left = true,
+                } => input.right = true,
                 KeyboardInput {
                     state: ElementState::Pressed,
                     virtual_keycode: Some(VirtualKeyCode::Space),
@@ -331,9 +335,24 @@ fn update_player(game: &mut Game, input: &Input) {
         player_rigid_body.apply_force(vector![10.0, 0.0], true);
     }
     if input.jump {
-        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
-        player_rigid_body.apply_force(vector![0.0, 100.0], true);
+        let is_grounded = is_player_grounded(game);
+        if is_grounded {
+            let player_rigid_body =
+                &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+            player_rigid_body.apply_force(vector![0.0, 100.0], true);
+        }
     }
+}
+
+fn is_player_grounded(game: &mut Game) -> bool {
+    let ray = Ray::new(
+        point!(game.state.player.position.x, game.state.player.position.y),
+        vector![0., -1.],
+    );
+
+    game.physics
+        .cast_ray(ray, 0.55, InteractionGroups::new(0b10, 0b10))
+        .is_some()
 }
 
 fn update_physics(game: &mut Game) {
@@ -342,7 +361,6 @@ fn update_physics(game: &mut Game) {
     let player_rigid_body = &game.physics.rigid_bodies[game.state.player.rigid_body_handle];
     let player_position_from_physics = player_rigid_body.translation();
     game.state.player.last_position = game.state.player.position;
-    println!("{}", player_position_from_physics);
     game.state.player.position.x = player_position_from_physics.x;
     game.state.player.position.y = player_position_from_physics.y;
 }
