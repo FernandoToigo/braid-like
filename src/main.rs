@@ -33,9 +33,11 @@ struct EventResults {
     exit_requested: bool,
 }
 
+#[derive(Default)]
 struct Input {
     right: bool,
     left: bool,
+    jump: bool,
 }
 
 struct Player {
@@ -90,8 +92,7 @@ fn main() {
     };
 
     let mut input = Input {
-        left: false,
-        right: false,
+        ..Default::default()
     };
 
     event_loop.run(move |event, _, control_flow| {
@@ -180,8 +181,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
         update(game, &input, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
-        input.left = false;
-        input.right = false;
+        *input = Default::default();
         update_count += 1;
         if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
             println!("WARNING. Game is slowing down.");
@@ -271,7 +271,12 @@ fn read_events<T>(
                     state: ElementState::Pressed,
                     virtual_keycode: Some(VirtualKeyCode::D),
                     ..
-                } => input.right = true,
+                } => input.left = true,
+                KeyboardInput {
+                    state: ElementState::Pressed,
+                    virtual_keycode: Some(VirtualKeyCode::Space),
+                    ..
+                } => input.jump = true,
                 _ => {}
             },
             WindowEvent::Resized(physical_size) => {
@@ -324,6 +329,10 @@ fn update_player(game: &mut Game, input: &Input) {
     if input.right {
         let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
         player_rigid_body.apply_force(vector![10.0, 0.0], true);
+    }
+    if input.jump {
+        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+        player_rigid_body.apply_force(vector![0.0, 100.0], true);
     }
 }
 
