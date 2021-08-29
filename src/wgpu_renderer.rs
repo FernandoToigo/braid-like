@@ -1,7 +1,7 @@
-﻿use anyhow::{Result, Error};
+﻿use anyhow::Error;
 use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
-use cgmath::{One, SquareMatrix};
+use cgmath::SquareMatrix;
 use image::GenericImageView;
 use cgmath::VectorSpace;
 
@@ -29,21 +29,16 @@ pub struct WgpuRenderer {
     pub num_indices: u32,
     pub depth_texture: Texture,
     pub textures_bind_group: wgpu::BindGroup,
-    pub instances: Instances,
+    pub instances: Vec<Instance>,
     pub surface_config: wgpu::SurfaceConfiguration,
-}
-
-pub struct Instances {
-    list: Box<[Instance]>,
-    count: u32,
 }
 
 #[derive(Clone)]
 pub struct Instance {
-    position: cgmath::Vector3<f32>,
-    rotation: cgmath::Quaternion<f32>,
-    scale: cgmath::Vector3<f32>,
-    texture_index: u32,
+    pub position: cgmath::Vector3<f32>,
+    pub rotation: cgmath::Quaternion<f32>,
+    pub scale: cgmath::Vector3<f32>,
+    pub texture_index: u32,
 }
 
 pub struct Texture {
@@ -196,7 +191,7 @@ impl Texture {
 }
 
 impl WgpuRenderer {
-    pub async fn init() -> (winit::event_loop::EventLoop<()>, Self) {
+    pub async fn init(instances: Vec<Instance>) -> (winit::event_loop::EventLoop<()>, Self) {
         let event_loop = winit::event_loop::EventLoop::new();
         let window = winit::window::WindowBuilder::new()
             .with_title("braid-like")
@@ -388,7 +383,7 @@ impl WgpuRenderer {
             },
         });
 
-        let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
+        /*let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
         let rotation = cgmath::Quaternion::one();
         let scale = cgmath::Vector3::new(1.0, 1.0, 1.0);
         let player = Instance {
@@ -411,11 +406,12 @@ impl WgpuRenderer {
         };
 
         let instances = Instances {
-            list: Box::new([player, ground, cat]),
-            count: 3
+            list: vec![player, ground, cat],
         };
 
-        let instance_data = instances.list.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = instances.list.iter().map(Instance::to_raw).collect::<Vec<_>>();
+        */
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
@@ -511,7 +507,7 @@ impl WgpuRenderer {
             render_pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_bind_group(0, &self.textures_bind_group, &[]);
             render_pass.set_bind_group(1, &self.uniform_bind_group, &[]);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.count as _);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -533,12 +529,11 @@ impl WgpuRenderer {
     }
 
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
-        let render_player_position = game_state.player_position_previous.lerp(game_state.player_position, interp_percent);
-        self.instances.list[0].position = render_player_position.extend(-1.);
-        self.instances.list[1].position = game_state.ground_position.extend(0.);
-        self.instances.list[1].scale = game_state.ground_scale.extend(0.);
+        let render_player_position = game_state.player.last_position
+            .lerp(game_state.player.position, interp_percent);
+        self.instances[0].position = render_player_position;
 
-        let instance_data = self.instances.list.into_iter().map(Instance::to_raw).collect::<Vec<_>>();
+        let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
@@ -547,8 +542,8 @@ impl WgpuRenderer {
 
     fn update_uniforms(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         let mut uniforms = Uniforms::new();
-        let render_camera_position = game_state.camera_position_previous.lerp(game_state.camera_position, interp_percent);
-        let camera_position = cgmath::Point3::new(render_camera_position.x, render_camera_position.y, 10.);
+        let render_camera_position = game_state.camera.last_position.lerp(game_state.camera.position, interp_percent);
+        let camera_position = cgmath::Point3::new(render_camera_position.x, render_camera_position.y, render_camera_position.z);
         let view = cgmath::Matrix4::look_to_rh(
             camera_position, 
             -cgmath::Vector3::unit_z(), 
@@ -557,9 +552,9 @@ impl WgpuRenderer {
         // @Incomplete: interpolate camera position.
         let window_size = self.window.inner_size();
         let aspect_ratio = window_size.width as f32 / window_size.height as f32;
-        let ortho_width = game_state.camera_orthographic_height * aspect_ratio;
+        let ortho_width = game_state.camera.orthographic_height * aspect_ratio;
         let half_ortho_width = ortho_width * 0.5;
-        let half_ortho_height = game_state.camera_orthographic_height * 0.5;
+        let half_ortho_height = game_state.camera.orthographic_height * 0.5;
         let proj = cgmath::ortho(-half_ortho_width, half_ortho_width, -half_ortho_height, half_ortho_height, -1000., 1000.);
         uniforms.view_proj = (proj * view).into();
 

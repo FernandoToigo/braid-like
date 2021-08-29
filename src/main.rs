@@ -1,8 +1,8 @@
 mod physics;
 mod wgpu_renderer;
 use crate::physics::{init_physics, Physics};
-use crate::wgpu_renderer::WgpuRenderer;
-use cgmath::Vector2;
+use crate::wgpu_renderer::{Instance, WgpuRenderer};
+use cgmath::{One, Vector2, Vector3};
 use futures::executor::block_on;
 use rapier2d::prelude::*;
 use std::time::Instant;
@@ -18,20 +18,14 @@ pub struct Game {
     start_instant: Instant,
     last_frame_micros: u128,
     last_update_micros: u128,
-    game_state: GameState,
+    state: GameState,
     profiler: puffin_http::Server,
 }
 
 pub struct GameState {
     micros_from_start: u128,
-    player_position_previous: cgmath::Vector2<f32>,
-    player_position: cgmath::Vector2<f32>,
-    player_rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
-    camera_position_previous: cgmath::Vector2<f32>,
-    camera_position: cgmath::Vector2<f32>,
-    camera_orthographic_height: f32,
-    ground_position: cgmath::Vector2<f32>,
-    ground_scale: cgmath::Vector2<f32>,
+    player: Player,
+    camera: Camera,
 }
 
 struct EventResults {
@@ -39,41 +33,51 @@ struct EventResults {
     exit_requested: bool,
 }
 
+struct Input {
+    right: bool,
+    left: bool,
+}
+
+struct Player {
+    position: cgmath::Vector3<f32>,
+    last_position: cgmath::Vector3<f32>,
+    rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
+}
+
+struct Camera {
+    position: Vector3<f32>,
+    last_position: Vector3<f32>,
+    orthographic_height: f32,
+}
+
+struct Wall {
+    position: cgmath::Vector3<f32>,
+    size: cgmath::Vector2<f32>,
+}
+
 fn main() {
     env_logger::init();
-    let (event_loop, renderer) = block_on(WgpuRenderer::init());
 
     let profiler = init_profiler();
     let mut physics = init_physics(UPDATE_INTERVAL_MICROS);
 
-    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic().build();
-    let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
-
-    let collider = ColliderBuilder::ball(0.5).restitution(0.7).build();
-    physics.colliders.insert_with_parent(
-        collider,
-        player_rigid_body_handle,
-        &mut physics.rigid_bodies,
-    );
-
-    let ground_position = Vector2::new(0.0, -2.0);
-    let ground_scale = cgmath::Vector2::new(2.0, 1.0);
-    let collider = ColliderBuilder::cuboid(ground_scale.x * 0.5, ground_scale.y * 0.5)
-        .translation(vector!(ground_position.x, ground_position.y))
-        .build();
-    physics.colliders.insert(collider);
-
-    let game_state = GameState {
-        micros_from_start: 0,
-        player_position_previous: Vector2::new(0., 0.),
-        player_position: Vector2::new(0., 0.),
-        player_rigid_body_handle,
-        camera_position_previous: Vector2::new(0., 0.),
-        camera_position: Vector2::new(0., 0.),
-        camera_orthographic_height: 10.,
-        ground_position,
-        ground_scale,
-    };
+    let walls = vec![
+        Wall {
+            position: Vector3::new(0., -0.5, 0.),
+            size: Vector2::new(2., 1.),
+        },
+        Wall {
+            position: Vector3::new(2., -1., 0.),
+            size: Vector2::new(1., 2.),
+        },
+        Wall {
+            position: Vector3::new(-2., -1., 0.),
+            size: Vector2::new(1., 2.),
+        },
+    ];
+    let state = create_game_state(&mut physics, &walls);
+    let instances = create_instances(&state, &walls);
+    let (event_loop, renderer) = block_on(WgpuRenderer::init(instances));
 
     let mut game = Game {
         renderer,
@@ -81,7 +85,7 @@ fn main() {
         start_instant: Instant::now(),
         last_frame_micros: 0,
         last_update_micros: 0,
-        game_state,
+        state,
         profiler,
     };
 
@@ -102,9 +106,67 @@ fn main() {
     });
 }
 
-struct Input {
-    right: bool,
-    left: bool,
+fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
+    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic().build();
+    let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
+
+    let collider = ColliderBuilder::cuboid(0.5, 0.5).restitution(0.7).build();
+    physics.colliders.insert_with_parent(
+        collider,
+        player_rigid_body_handle,
+        &mut physics.rigid_bodies,
+    );
+
+    walls
+        .iter()
+        .map(|wall| {
+            ColliderBuilder::cuboid(wall.size.x * 0.5, wall.size.y * 0.5)
+                .translation(vector!(wall.position.x, wall.position.y))
+                .build()
+        })
+        .for_each(|collider| {
+            physics.colliders.insert(collider);
+        });
+
+    GameState {
+        micros_from_start: 0,
+        player: Player {
+            position: Vector3::new(0., 0., -1.),
+            last_position: Vector3::new(0., 0., -1.),
+            rigid_body_handle: player_rigid_body_handle,
+        },
+        camera: Camera {
+            position: Vector3::new(0., 0., 10.),
+            last_position: Vector3::new(0., 0., 10.),
+            orthographic_height: 10.,
+        },
+    }
+}
+
+fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<Instance> {
+    let mut instances = Vec::new();
+    instances.push(Instance {
+        position: state.player.position,
+        rotation: cgmath::Quaternion::one(),
+        scale: Vector3::new(1., 1., 1.),
+        texture_index: 0,
+    });
+    walls.iter().for_each(|wall| {
+        instances.push(Instance {
+            position: wall.position,
+            scale: wall.size.extend(1.),
+            rotation: cgmath::Quaternion::one(),
+            texture_index: 1,
+        })
+    });
+    instances.push(Instance {
+        position: Vector3::new(0., 0., 0.),
+        scale: Vector3::new(1., 1., 1.),
+        rotation: cgmath::Quaternion::one(),
+        texture_index: 2,
+    });
+
+    instances
 }
 
 fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::SurfaceError> {
@@ -235,7 +297,7 @@ fn read_events<T>(
 fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     puffin::profile_function!();
 
-    game.game_state.micros_from_start += delta_micros;
+    game.state.micros_from_start += delta_micros;
 
     //let radians_per_second = std::f32::consts::PI * 0.5;
     //let radians_per_micros = radians_per_second / 1e+6;
@@ -248,32 +310,32 @@ fn update(game: &mut Game, input: &Input, delta_micros: u128) {
 }
 
 fn update_camera(game: &mut Game) {
-    game.game_state.camera_orthographic_height = 10.;
-    game.game_state.camera_position_previous = game.game_state.camera_position;
-    game.game_state.camera_position = game.game_state.player_position;
+    game.state.camera.orthographic_height = 10.;
+    game.state.camera.last_position = game.state.camera.position;
+    game.state.camera.position.x = game.state.player.position.x;
+    game.state.camera.position.y = game.state.player.position.y;
 }
 
 fn update_player(game: &mut Game, input: &Input) {
-    game.game_state.player_position_previous = game.game_state.player_position;
     if input.left {
-        let player_rigid_body =
-            &mut game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
-        player_rigid_body.apply_force(vector![-1.0, 0.0], true);
+        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+        player_rigid_body.apply_force(vector![-10.0, 0.0], true);
     }
     if input.right {
-        let player_rigid_body =
-            &mut game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
-        player_rigid_body.apply_force(vector![1.0, 0.0], true);
+        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+        player_rigid_body.apply_force(vector![10.0, 0.0], true);
     }
 }
 
 fn update_physics(game: &mut Game) {
     game.physics.run_frame();
 
-    let player_rigid_body = &game.physics.rigid_bodies[game.game_state.player_rigid_body_handle];
+    let player_rigid_body = &game.physics.rigid_bodies[game.state.player.rigid_body_handle];
     let player_position_from_physics = player_rigid_body.translation();
-    game.game_state.player_position.x = player_position_from_physics.x;
-    game.game_state.player_position.y = player_position_from_physics.y;
+    game.state.player.last_position = game.state.player.position;
+    println!("{}", player_position_from_physics);
+    game.state.player.position.x = player_position_from_physics.x;
+    game.state.player.position.y = player_position_from_physics.y;
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
@@ -282,5 +344,5 @@ fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
     let micros_since_last_updated = (now_micros - game.last_update_micros) as f32;
     let interp_percent = micros_since_last_updated / UPDATE_INTERVAL_MICROS as f32;
 
-    game.renderer.render(&game.game_state, interp_percent)
+    game.renderer.render(&game.state, interp_percent)
 }
