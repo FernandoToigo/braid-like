@@ -210,16 +210,13 @@ impl WgpuRenderer {
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             features: wgpu::Features::UNSIZED_BINDING_ARRAY
             | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-            | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-
-,
+            | wgpu::Features::TEXTURE_BINDING_ARRAY | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
             limits: wgpu::Limits::default(),
             label: Some("Device"),
         }, None).await.unwrap();
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            //format: wgpu::TextureFormat::Bgra8UnormSrgb,
             format: surface.get_preferred_format(&adapter).unwrap(),
             width: size.width,
             height: size.height,
@@ -383,34 +380,6 @@ impl WgpuRenderer {
             },
         });
 
-        /*let position = cgmath::Vector3 { x: 0.0, y: 0.0, z: 0.0 };
-        let rotation = cgmath::Quaternion::one();
-        let scale = cgmath::Vector3::new(1.0, 1.0, 1.0);
-        let player = Instance {
-            position,
-            rotation,
-            scale,
-            texture_index: 0,
-        };
-        let ground = Instance {
-            position,
-            rotation,
-            scale,
-            texture_index: 1,
-        };
-        let cat = Instance {
-            position,
-            rotation,
-            scale,
-            texture_index: 2
-        };
-
-        let instances = Instances {
-            list: vec![player, ground, cat],
-        };
-
-        let instance_data = instances.list.iter().map(Instance::to_raw).collect::<Vec<_>>();
-        */
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
