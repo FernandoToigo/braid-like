@@ -309,17 +309,9 @@ fn is_pressed(state: &ElementState) -> bool {
 fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     puffin::profile_function!();
 
-    println!(
-        "{} {}",
-        match input.left {
-            true => "LEFT",
-            _ => "",
-        },
-        match input.right {
-            true => "RIGHT",
-            _ => "",
-        }
-    );
+    if input.has_any_input() {
+        println!("{}", input);
+    }
 
     game.state.micros_from_start += delta_micros;
 
@@ -387,4 +379,29 @@ fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
     let interp_percent = micros_since_last_updated / UPDATE_INTERVAL_MICROS as f32;
 
     game.renderer.render(&game.state, interp_percent)
+}
+
+impl Input {
+    fn has_any_input(&self) -> bool {
+        self.left || self.right || self.jump
+    }
+}
+
+impl std::fmt::Display for Input {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] [{}] [{}]",
+            bool_to_x(self.left, "____", "LEFT"),
+            bool_to_x(self.jump, "____", "JUMP"),
+            bool_to_x(self.right, "_____", "RIGHT"),
+        )
+    }
+}
+
+fn bool_to_x(value: bool, false_value: &'static str, true_value: &'static str) -> &'static str {
+    match value {
+        true => true_value,
+        _ => false_value,
+    }
 }
