@@ -1,8 +1,8 @@
 mod physics;
 mod wgpu_renderer;
 use crate::physics::{init_physics, Physics};
-use crate::wgpu_renderer::{Instance, WgpuRenderer};
-use cgmath::{One, Vector2, Vector3};
+use crate::wgpu_renderer::{InstanceRaw, WgpuRenderer};
+use cgmath::{Vector2, Vector3};
 use futures::executor::block_on;
 use rapier2d::prelude::*;
 use std::time::Instant;
@@ -43,6 +43,7 @@ struct Input {
 struct Player {
     position: cgmath::Vector3<f32>,
     last_position: cgmath::Vector3<f32>,
+    texture_index: u32,
     rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
 }
 
@@ -139,6 +140,7 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
             position: Vector3::new(0., 0., -1.),
             last_position: Vector3::new(0., 0., -1.),
             rigid_body_handle: player_rigid_body_handle,
+            texture_index: 0,
         },
         camera: Camera {
             position: Vector3::new(0., 0., 10.),
@@ -148,28 +150,23 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
     }
 }
 
-fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<Instance> {
+fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
     let mut instances = Vec::new();
-    instances.push(Instance {
-        position: state.player.position,
-        rotation: cgmath::Quaternion::one(),
-        scale: Vector3::new(1., 1., 1.),
-        texture_index: 0,
-    });
-    walls.iter().for_each(|wall| {
-        instances.push(Instance {
-            position: wall.position,
-            scale: wall.size.extend(1.),
-            rotation: cgmath::Quaternion::one(),
-            texture_index: 1,
-        })
-    });
-    instances.push(Instance {
-        position: Vector3::new(0., 0., 0.),
-        scale: Vector3::new(1., 1., 1.),
-        rotation: cgmath::Quaternion::one(),
-        texture_index: 2,
-    });
+    instances.push(InstanceRaw::new(
+        state.player.position,
+        Vector3::new(1., 1., 1.),
+        state.player.texture_index,
+    ));
+
+    walls
+        .iter()
+        .for_each(|wall| instances.push(InstanceRaw::new(wall.position, wall.size.extend(1.), 1)));
+
+    instances.push(InstanceRaw::new(
+        Vector3::new(0., 0., 0.),
+        Vector3::new(1., 1., 1.),
+        2,
+    ));
 
     instances
 }

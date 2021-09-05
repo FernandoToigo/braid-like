@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use wgpu::util::DeviceExt;
 use cgmath::SquareMatrix;
 use image::GenericImageView;
-use cgmath::VectorSpace;
+use cgmath::{VectorSpace, Vector3, Matrix4, One};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -29,16 +29,8 @@ pub struct WgpuRenderer {
     pub num_indices: u32,
     pub depth_texture: Texture,
     pub textures_bind_group: wgpu::BindGroup,
-    pub instances: Vec<Instance>,
+    pub instances: Vec<InstanceRaw>,
     pub surface_config: wgpu::SurfaceConfiguration,
-}
-
-#[derive(Clone)]
-pub struct Instance {
-    pub position: cgmath::Vector3<f32>,
-    pub rotation: cgmath::Quaternion<f32>,
-    pub scale: cgmath::Vector3<f32>,
-    pub texture_index: u32,
 }
 
 pub struct Texture {
@@ -56,7 +48,7 @@ struct Vertex {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct InstanceRaw {
+pub struct InstanceRaw {
     model: [[f32; 4]; 4],
     texture_index: u32
 }
@@ -191,7 +183,7 @@ impl Texture {
 }
 
 impl WgpuRenderer {
-    pub async fn init(instances: Vec<Instance>) -> (winit::event_loop::EventLoop<()>, Self) {
+    pub async fn init(instances: Vec<InstanceRaw>) -> (winit::event_loop::EventLoop<()>, Self) {
         let event_loop = winit::event_loop::EventLoop::new();
         let window = winit::window::WindowBuilder::new()
             .with_title("braid-like")
@@ -380,11 +372,10 @@ impl WgpuRenderer {
             },
         });
 
-        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(
             &wgpu::util::BufferInitDescriptor {
                 label: Some("Instance Buffer"),
-                contents: bytemuck::cast_slice(&instance_data),
+                contents: bytemuck::cast_slice(&instances),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }
         );
@@ -500,13 +491,12 @@ impl WgpuRenderer {
     fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
         let render_player_position = game_state.player.last_position
             .lerp(game_state.player.position, interp_percent);
-        self.instances[0].position = render_player_position;
+        self.instances[0].update(render_player_position, Vector3::new(1.0, 1.0, 1.0), game_state.player.texture_index);
 
-        let instance_data = self.instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         self.queue.write_buffer(
             &self.instance_buffer,
             0,
-            bytemuck::cast_slice(&instance_data));
+            bytemuck::cast_slice(&self.instances));
     }
 
     fn update_uniforms(&mut self, game_state: &crate::GameState, interp_percent: f32) {
@@ -518,7 +508,6 @@ impl WgpuRenderer {
             -cgmath::Vector3::unit_z(), 
             cgmath::Vector3::unit_y());
 
-        // @Incomplete: interpolate camera position.
         let window_size = self.window.inner_size();
         let aspect_ratio = window_size.width as f32 / window_size.height as f32;
         let ortho_width = game_state.camera.orthographic_height * aspect_ratio;
@@ -611,14 +600,21 @@ impl InstanceRaw {
     }
 }
 
-impl Instance {
-    fn to_raw(&self) -> InstanceRaw {
-        InstanceRaw {
-            model: (cgmath::Matrix4::from_translation(self.position) *
-                cgmath::Matrix4::from(self.rotation) * 
-                cgmath::Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z)).into(),
-            texture_index: self.texture_index
-        }
+impl InstanceRaw {
+    pub fn new(position: Vector3<f32>, scale: Vector3<f32>, texture_index: u32) -> Self {
+        let mut instance = InstanceRaw {
+            model: Matrix4::one().into(),
+            texture_index: 0
+        };
+        instance.update(position, scale, texture_index);
+        instance
+    }
+
+    fn update(&mut self, position: Vector3<f32>, scale: Vector3<f32>, texture_index: u32) {
+            self.model = (Matrix4::from_translation(position) *
+                //cgmath::Matrix4::from(rotation) * // Ignoring rotation for now.
+                Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z)).into();
+            self.texture_index = texture_index
     }
 }
 
