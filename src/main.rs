@@ -182,7 +182,6 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
         update(game, &input, UPDATE_INTERVAL_MICROS);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
-        *input = Default::default();
         update_count += 1;
         if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
             println!("WARNING. Game is slowing down.");
@@ -264,20 +263,20 @@ fn read_events<T>(
                     ..
                 } => event_results.exit_requested = true,
                 KeyboardInput {
-                    state: ElementState::Pressed,
+                    state,
                     virtual_keycode: Some(VirtualKeyCode::A),
                     ..
-                } => input.left = true,
+                } => input.left = is_pressed(state),
                 KeyboardInput {
-                    state: ElementState::Pressed,
+                    state,
                     virtual_keycode: Some(VirtualKeyCode::D),
                     ..
-                } => input.right = true,
+                } => input.right = is_pressed(state),
                 KeyboardInput {
-                    state: ElementState::Pressed,
+                    state,
                     virtual_keycode: Some(VirtualKeyCode::Space),
                     ..
-                } => input.jump = true,
+                } => input.jump = is_pressed(state),
                 _ => {}
             },
             WindowEvent::Resized(physical_size) => {
@@ -300,8 +299,27 @@ fn read_events<T>(
     event_results
 }
 
+fn is_pressed(state: &ElementState) -> bool {
+    match state {
+        ElementState::Pressed => true,
+        _ => false,
+    }
+}
+
 fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     puffin::profile_function!();
+
+    println!(
+        "{} {}",
+        match input.left {
+            true => "LEFT",
+            _ => "",
+        },
+        match input.right {
+            true => "RIGHT",
+            _ => "",
+        }
+    );
 
     game.state.micros_from_start += delta_micros;
 
