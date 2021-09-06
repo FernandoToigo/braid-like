@@ -322,15 +322,17 @@ fn update_camera(game: &mut Game) {
     game.state.camera.orthographic_height = 10.;
     game.state.camera.last_position = game.state.camera.position;
     game.state.camera.position.x = game.state.player.position.x;
-    game.state.camera.position.y = game.state.player.position.y;
+    game.state.camera.position.y = game.state.player.position.y + 1.;
 }
 
-fn update_player(game: &mut Game, input: &Input) {
-    const JUMP_HEIGHT: f32 = 2.;
-    const JUMP_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
-    const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 2.;
-    const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.75;
+const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 16.;
+const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 8.;
+const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
+const JUMP_HEIGHT: f32 = 2.;
+const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
+const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.4;
 
+fn update_player(game: &mut Game, input: &Input) {
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
 
     let mut velocity = {
@@ -338,29 +340,47 @@ fn update_player(game: &mut Game, input: &Input) {
         Vector2::new(current_velocity.x, current_velocity.y)
     };
 
-    if input.jump && is_player_grounded(game) {
-        velocity.y = (2. * JUMP_HEIGHT * JUMP_HORIZONTAL_VELOCITY_PER_SECOND)
+    let is_grounded = is_player_grounded(game);
+
+    if input.jump && is_grounded {
+        velocity.y = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
             / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
     }
 
-    if input.left {
-        velocity.x = -JUMP_HORIZONTAL_VELOCITY_PER_SECOND;
-    }
-    if input.right {
-        velocity.x = JUMP_HORIZONTAL_VELOCITY_PER_SECOND;
+    let sign = match (input.left, input.right) {
+        (true, false) => -1.,
+        (false, true) => 1.,
+        _ => 0.,
+    };
+
+    let horizontal_acceleration = get_horizontal_acceleration(is_grounded);
+    let delta_velocity_x = horizontal_acceleration * to_seconds(UPDATE_INTERVAL_MICROS) * sign;
+    let new_velocity_x = velocity.x + delta_velocity_x;
+    if new_velocity_x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND
+        && new_velocity_x < MAX_HORIZONTAL_VELOCITY_PER_SECOND
+    {
+        velocity.x = new_velocity_x;
     }
 
-    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
     let travel_distance = match velocity.y > 0. {
         true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
         false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
     };
     let gravity = (-2.
         * JUMP_HEIGHT
-        * (JUMP_HORIZONTAL_VELOCITY_PER_SECOND * JUMP_HORIZONTAL_VELOCITY_PER_SECOND))
+        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
         / (travel_distance * travel_distance);
     velocity.y += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+
+    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
+}
+
+fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
+    match is_grounded {
+        true => HORIZONTAL_ACCELERATION_PER_SECOND,
+        false => JUMP_HORIZONTAL_ACCELERATION_PER_SECOND,
+    }
 }
 
 fn is_player_grounded(game: &mut Game) -> bool {
