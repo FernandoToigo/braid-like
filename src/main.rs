@@ -116,6 +116,7 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
+        .friction(0.15)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
         .build();
     physics.colliders.insert_with_parent(
@@ -328,6 +329,7 @@ fn update_player(game: &mut Game, input: &Input) {
     const JUMP_HEIGHT: f32 = 2.;
     const JUMP_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
     const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 2.;
+    const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.75;
 
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
 
@@ -349,11 +351,15 @@ fn update_player(game: &mut Game, input: &Input) {
     }
 
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    let travel_distance = match velocity.y > 0. {
+        true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
+        false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
+    };
     let gravity = (-2.
         * JUMP_HEIGHT
         * (JUMP_HORIZONTAL_VELOCITY_PER_SECOND * JUMP_HORIZONTAL_VELOCITY_PER_SECOND))
-        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
-    velocity.y += gravity * (1e-6 * UPDATE_INTERVAL_MICROS as f32);
+        / (travel_distance * travel_distance);
+    velocity.y += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
 
