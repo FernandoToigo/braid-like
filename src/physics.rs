@@ -18,7 +18,8 @@ pub fn init_physics(time_step_micros: u128) -> Physics {
     let rigid_bodies = RigidBodySet::new();
     let colliders = ColliderSet::new();
 
-    let gravity = vector![0.0, -9.81];
+    //let gravity = vector![0.0, -9.81];
+    let gravity = vector![0.0, 0.0];
     let mut integration_parameters = IntegrationParameters::default();
     integration_parameters.dt = time_step_micros as f32 / 1e6;
     let pipeline = PhysicsPipeline::new();

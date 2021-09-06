@@ -70,12 +70,12 @@ fn main() {
             size: Vector2::new(2., 1.),
         },
         Wall {
-            position: Vector3::new(2., -1., 0.),
-            size: Vector2::new(1., 2.),
+            position: Vector3::new(1.75, 1., 0.),
+            size: Vector2::new(1., 1.),
         },
         Wall {
-            position: Vector3::new(-2., -1., 0.),
-            size: Vector2::new(1., 2.),
+            position: Vector3::new(3., 2., 0.),
+            size: Vector2::new(1., 1.),
         },
     ];
     let state = create_game_state(&mut physics, &walls);
@@ -109,12 +109,14 @@ fn main() {
 }
 
 fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
-    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic().build();
+    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
+        .lock_rotations()
+        .build();
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
-    let collider = ColliderBuilder::cuboid(0.5, 0.5)
+    let collider = ColliderBuilder::cuboid(0.25, 0.5)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
-        .restitution(0.7)
+        //.restitution(0.7)
         .build();
     physics.colliders.insert_with_parent(
         collider,
@@ -130,14 +132,14 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
                 .collision_groups(InteractionGroups::new(0b10, 0xFFFF))
                 .build()
         })
-        .for_each(|collider| {
-            physics.colliders.insert(collider);
+        .for_each(|wall_collider| {
+            physics.colliders.insert(wall_collider);
         });
 
     GameState {
         micros_from_start: 0,
         player: Player {
-            position: Vector3::new(0., 0., -1.),
+            position: Vector3::new(0., 0.5, -1.),
             last_position: Vector3::new(0., 0., -1.),
             rigid_body_handle: player_rigid_body_handle,
             texture_index: 0,
@@ -309,10 +311,6 @@ fn is_pressed(state: &ElementState) -> bool {
 fn update(game: &mut Game, input: &Input, delta_micros: u128) {
     puffin::profile_function!();
 
-    if input.has_any_input() {
-        println!("{}", input);
-    }
-
     game.state.micros_from_start += delta_micros;
 
     //let radians_per_second = std::f32::consts::PI * 0.5;
@@ -333,22 +331,31 @@ fn update_camera(game: &mut Game) {
 }
 
 fn update_player(game: &mut Game, input: &Input) {
+    const JUMP_HEIGHT: f32 = 2.;
+    const JUMP_TIME_SECONDS: f32 = 0.5;
+
+    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+
     if input.left {
-        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
         player_rigid_body.apply_force(vector![-10.0, 0.0], true);
     }
     if input.right {
-        let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
         player_rigid_body.apply_force(vector![10.0, 0.0], true);
     }
-    if input.jump {
-        let is_grounded = is_player_grounded(game);
-        if is_grounded {
-            let player_rigid_body =
-                &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
-            player_rigid_body.apply_force(vector![0.0, 100.0], true);
-        }
+
+    let mut velocity = {
+        let current_velocity = player_rigid_body.linvel();
+        Vector2::new(current_velocity.x, current_velocity.y)
+    };
+
+    if input.jump && is_player_grounded(game) {
+        velocity.y = (2. * JUMP_HEIGHT) / JUMP_TIME_SECONDS;
     }
+
+    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    let gravity = (-2. * JUMP_HEIGHT) / (JUMP_TIME_SECONDS * JUMP_TIME_SECONDS);
+    velocity.y += gravity * (1e-6 * UPDATE_INTERVAL_MICROS as f32);
+    player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
 
 fn is_player_grounded(game: &mut Game) -> bool {
@@ -358,7 +365,7 @@ fn is_player_grounded(game: &mut Game) -> bool {
     );
 
     game.physics
-        .cast_ray(ray, 0.55, InteractionGroups::new(0b10, 0b10))
+        .cast_ray(ray, 0.51, InteractionGroups::new(0b10, 0b10))
         .is_some()
 }
 
@@ -370,6 +377,15 @@ fn update_physics(game: &mut Game) {
     game.state.player.last_position = game.state.player.position;
     game.state.player.position.x = player_position_from_physics.x;
     game.state.player.position.y = player_position_from_physics.y;
+    /*println!(
+        "position: [{}] {}",
+        to_seconds(game.last_update_micros),
+        game.state.player.position.y - 0.5
+    );*/
+}
+
+fn _to_seconds(micros: u128) -> f32 {
+    micros as f32 * 1e-6
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
@@ -382,7 +398,7 @@ fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
 }
 
 impl Input {
-    fn has_any_input(&self) -> bool {
+    fn _has_any_input(&self) -> bool {
         self.left || self.right || self.jump
     }
 }
