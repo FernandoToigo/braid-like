@@ -17,13 +17,13 @@ pub struct Game {
     physics: Physics,
     start_instant: Instant,
     last_frame_micros: u128,
+    frame_count: u128,
     last_update_micros: u128,
     state: GameState,
     profiler: puffin_http::Server,
 }
 
 pub struct GameState {
-    micros_from_start: u128,
     player: Player,
     camera: Camera,
 }
@@ -67,15 +67,15 @@ fn main() {
     let walls = vec![
         Wall {
             position: Vector3::new(0., -0.5, 0.),
-            size: Vector2::new(2., 1.),
+            size: Vector2::new(20., 1.),
         },
         Wall {
             position: Vector3::new(1.75, 1., 0.),
             size: Vector2::new(1., 1.),
         },
         Wall {
-            position: Vector3::new(3., 2., 0.),
-            size: Vector2::new(1., 1.),
+            position: Vector3::new(-14.5, -0.5, 0.),
+            size: Vector2::new(2., 1.),
         },
     ];
     let state = create_game_state(&mut physics, &walls);
@@ -87,6 +87,7 @@ fn main() {
         physics,
         start_instant: Instant::now(),
         last_frame_micros: 0,
+        frame_count: 0,
         last_update_micros: 0,
         state,
         profiler,
@@ -116,7 +117,6 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
 
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
-        //.restitution(0.7)
         .build();
     physics.colliders.insert_with_parent(
         collider,
@@ -137,7 +137,6 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
         });
 
     GameState {
-        micros_from_start: 0,
         player: Player {
             position: Vector3::new(0., 0.5, -1.),
             last_position: Vector3::new(0., 0., -1.),
@@ -182,7 +181,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
 
     let mut update_count = 0;
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
-        update(game, &input, UPDATE_INTERVAL_MICROS);
+        update(game, &input);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
         update_count += 1;
         if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
@@ -308,15 +307,10 @@ fn is_pressed(state: &ElementState) -> bool {
     }
 }
 
-fn update(game: &mut Game, input: &Input, delta_micros: u128) {
+fn update(game: &mut Game, input: &Input) {
     puffin::profile_function!();
 
-    game.state.micros_from_start += delta_micros;
-
-    //let radians_per_second = std::f32::consts::PI * 0.5;
-    //let radians_per_micros = radians_per_second / 1e+6;
-    //let x = (game.game_state.micros_from_start as f32 * radians_per_micros).cos();
-    //let y = (game.game_state.micros_from_start as f32 * radians_per_micros).sin();
+    game.frame_count += 1;
 
     update_player(game, input);
     update_physics(game);
@@ -332,16 +326,10 @@ fn update_camera(game: &mut Game) {
 
 fn update_player(game: &mut Game, input: &Input) {
     const JUMP_HEIGHT: f32 = 2.;
-    const JUMP_TIME_SECONDS: f32 = 0.5;
+    const JUMP_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
+    const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 2.;
 
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
-
-    if input.left {
-        player_rigid_body.apply_force(vector![-10.0, 0.0], true);
-    }
-    if input.right {
-        player_rigid_body.apply_force(vector![10.0, 0.0], true);
-    }
 
     let mut velocity = {
         let current_velocity = player_rigid_body.linvel();
@@ -349,11 +337,22 @@ fn update_player(game: &mut Game, input: &Input) {
     };
 
     if input.jump && is_player_grounded(game) {
-        velocity.y = (2. * JUMP_HEIGHT) / JUMP_TIME_SECONDS;
+        velocity.y = (2. * JUMP_HEIGHT * JUMP_HORIZONTAL_VELOCITY_PER_SECOND)
+            / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+    }
+
+    if input.left {
+        velocity.x = -JUMP_HORIZONTAL_VELOCITY_PER_SECOND;
+    }
+    if input.right {
+        velocity.x = JUMP_HORIZONTAL_VELOCITY_PER_SECOND;
     }
 
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
-    let gravity = (-2. * JUMP_HEIGHT) / (JUMP_TIME_SECONDS * JUMP_TIME_SECONDS);
+    let gravity = (-2.
+        * JUMP_HEIGHT
+        * (JUMP_HORIZONTAL_VELOCITY_PER_SECOND * JUMP_HORIZONTAL_VELOCITY_PER_SECOND))
+        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
     velocity.y += gravity * (1e-6 * UPDATE_INTERVAL_MICROS as f32);
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
@@ -378,13 +377,15 @@ fn update_physics(game: &mut Game) {
     game.state.player.position.x = player_position_from_physics.x;
     game.state.player.position.y = player_position_from_physics.y;
     /*println!(
-        "position: [{}] {}",
+        "position: [{} ({}secs)] ({};{})",
+        game.frame_count,
         to_seconds(game.last_update_micros),
+        game.state.player.position.x,
         game.state.player.position.y - 0.5
     );*/
 }
 
-fn _to_seconds(micros: u128) -> f32 {
+fn to_seconds(micros: u128) -> f32 {
     micros as f32 * 1e-6
 }
 
