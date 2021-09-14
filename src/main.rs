@@ -38,6 +38,7 @@ struct Input {
     right: bool,
     left: bool,
     jump: bool,
+    debug_one: bool,
 }
 
 struct Player {
@@ -112,6 +113,7 @@ fn main() {
 fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
     let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
         .lock_rotations()
+        //.ccd_enabled(true)
         .build();
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
@@ -279,6 +281,11 @@ fn read_events<T>(
                     virtual_keycode: Some(VirtualKeyCode::Space),
                     ..
                 } => input.jump = is_pressed(state),
+                KeyboardInput {
+                    state,
+                    virtual_keycode: Some(VirtualKeyCode::F1),
+                    ..
+                } => input.debug_one = is_pressed(state),
                 _ => {}
             },
             WindowEvent::Resized(physical_size) => {
@@ -366,14 +373,17 @@ fn update_player(game: &mut Game, input: &Input) {
         true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
         false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
     };
-    let gravity = (-2.
-        * JUMP_HEIGHT
-        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
-        / (travel_distance * travel_distance);
-    velocity.y += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+    if !input.debug_one {
+        let gravity = (-2.
+            * JUMP_HEIGHT
+            * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
+            / (travel_distance * travel_distance);
+        velocity.y += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+    }
 
     let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
+    println!("({},{})", velocity.x, velocity.y);
 }
 
 fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
