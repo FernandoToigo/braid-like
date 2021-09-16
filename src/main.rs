@@ -332,7 +332,7 @@ fn update_camera(game: &mut Game) {
     game.state.camera.position.y = game.state.player.position.y + 1.;
 }
 
-const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 26.;
+const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 36.;
 const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 8.;
 const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
 const JUMP_HEIGHT: f32 = 2.;
