@@ -26,6 +26,12 @@ pub struct Game {
 pub struct GameState {
     player: Player,
     camera: Camera,
+    inputs: Vec<InputRegistry>,
+}
+
+struct InputRegistry {
+    input: Input,
+    count: u128,
 }
 
 struct EventResults {
@@ -33,7 +39,7 @@ struct EventResults {
     exit_requested: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, PartialEq, Clone)]
 struct Input {
     right: bool,
     left: bool,
@@ -151,6 +157,7 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
             last_position: Vector3::new(0., 0., 10.),
             orthographic_height: 10.,
         },
+        inputs: Vec::with_capacity(9000),
     }
 }
 
@@ -320,16 +327,36 @@ fn update(game: &mut Game, input: &Input) {
 
     game.frame_count += 1;
 
+    store_input(game, input);
     update_player(game, input);
     update_physics(game);
     update_camera(game);
 }
 
+fn store_input(game: &mut Game, input: &Input) {
+    if game.state.inputs.len() == 0 {
+        game.state.inputs.push(InputRegistry {
+            input: input.clone(),
+            count: 1,
+        });
+    } else {
+        let last_input_index = game.state.inputs.len() - 1;
+        if game.state.inputs[last_input_index].input == *input {
+            game.state.inputs[last_input_index].count += 1;
+        } else {
+            game.state.inputs.push(InputRegistry {
+                input: input.clone(),
+                count: 1,
+            });
+        }
+    }
+}
+
 fn update_camera(game: &mut Game) {
     game.state.camera.orthographic_height = 10.;
-    game.state.camera.last_position = game.state.camera.position;
+    /*game.state.camera.last_position = game.state.camera.position;
     game.state.camera.position.x = game.state.player.position.x;
-    game.state.camera.position.y = game.state.player.position.y + 1.;
+    game.state.camera.position.y = game.state.player.position.y + 1.;*/
 }
 
 const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 16.;
