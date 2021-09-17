@@ -52,6 +52,7 @@ struct Player {
     last_position: cgmath::Vector3<f32>,
     texture_index: u32,
     rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
+    force_jumping: bool,
 }
 
 struct Camera {
@@ -151,6 +152,7 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
             last_position: Vector3::new(0., 0., -1.),
             rigid_body_handle: player_rigid_body_handle,
             texture_index: 0,
+            force_jumping: false,
         },
         camera: Camera {
             position: Vector3::new(0., 0., 10.),
@@ -376,9 +378,14 @@ fn update_player(game: &mut Game, input: &Input) {
 
     let is_grounded = is_player_grounded(game);
 
-    if input.jump && is_grounded {
+    if is_grounded && input.jump {
         velocity.y = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
             / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+        game.state.player.force_jumping = true;
+    }
+
+    if !is_grounded && !input.jump {
+        game.state.player.force_jumping = false;
     }
 
     let sign = match (input.left, input.right) {
@@ -396,7 +403,7 @@ fn update_player(game: &mut Game, input: &Input) {
         velocity.x = new_velocity_x;
     }
 
-    let travel_distance = match velocity.y > 0. {
+    let travel_distance = match velocity.y > 0. && game.state.player.force_jumping {
         true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
         false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
     };
