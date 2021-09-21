@@ -19,14 +19,23 @@ pub struct Game {
     last_frame_micros: u128,
     frame_count: u128,
     last_update_micros: u128,
+    scenario: Scenario,
     state: GameState,
     profiler: puffin_http::Server,
+    inputs: Vec<InputRegistry>,
+    is_replaying: bool,
+    replay_registry_index: usize,
+    replay_registry_count: u128,
+}
+
+pub struct Scenario {
+    player_start_position: Vector3<f32>,
+    walls: Vec<Wall>,
 }
 
 pub struct GameState {
     player: Player,
     camera: Camera,
-    inputs: Vec<InputRegistry>,
 }
 
 struct InputRegistry {
@@ -44,6 +53,7 @@ struct Input {
     right: bool,
     left: bool,
     jump: bool,
+    confirm: bool,
     debug_one: bool,
 }
 
@@ -53,6 +63,8 @@ struct Player {
     texture_index: u32,
     rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
     force_jumping: bool,
+    velocity: cgmath::Vector2<f32>,
+    applied_vel: cgmath::Vector2<f32>,
 }
 
 struct Camera {
@@ -72,22 +84,25 @@ fn main() {
     let profiler = init_profiler();
     let mut physics = init_physics(UPDATE_INTERVAL_MICROS);
 
-    let walls = vec![
-        Wall {
-            position: Vector3::new(0., -0.5, 0.),
-            size: Vector2::new(20., 1.),
-        },
-        Wall {
-            position: Vector3::new(1.75, 1., 0.),
-            size: Vector2::new(1., 1.),
-        },
-        Wall {
-            position: Vector3::new(-14.5, -0.5, 0.),
-            size: Vector2::new(2., 1.),
-        },
-    ];
-    let state = create_game_state(&mut physics, &walls);
-    let instances = create_instances(&state, &walls);
+    let scenario = Scenario {
+        player_start_position: Vector3::new(0., 0.5, -1.),
+        walls: vec![
+            Wall {
+                position: Vector3::new(0., -0.5, 0.),
+                size: Vector2::new(20., 1.),
+            },
+            Wall {
+                position: Vector3::new(1.75, 1., 0.),
+                size: Vector2::new(1., 1.),
+            },
+            Wall {
+                position: Vector3::new(-14.5, -0.5, 0.),
+                size: Vector2::new(2., 1.),
+            },
+        ],
+    };
+    let state = create_game_state(&mut physics, &scenario);
+    let instances = create_instances(&state, &scenario.walls);
     let (event_loop, renderer) = block_on(WgpuRenderer::init(instances));
 
     let mut game = Game {
@@ -97,8 +112,13 @@ fn main() {
         last_frame_micros: 0,
         frame_count: 0,
         last_update_micros: 0,
+        scenario,
         state,
         profiler,
+        inputs: Vec::with_capacity(9000),
+        is_replaying: false,
+        replay_registry_index: 0,
+        replay_registry_count: 0,
     };
 
     let mut input = Input {
@@ -117,14 +137,18 @@ fn main() {
     });
 }
 
-fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
+fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
     let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
+        .translation(vector![
+            scenario.player_start_position.x,
+            scenario.player_start_position.y
+        ])
         .lock_rotations()
         .build();
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
-        .friction(0.15)
+        .friction(0.0)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
         .build();
     physics.colliders.insert_with_parent(
@@ -133,12 +157,13 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
         &mut physics.rigid_bodies,
     );
 
-    walls
+    scenario
+        .walls
         .iter()
         .map(|wall| {
             ColliderBuilder::cuboid(wall.size.x * 0.5, wall.size.y * 0.5)
                 .translation(vector!(wall.position.x, wall.position.y))
-                .friction(0.15)
+                .friction(0.0)
                 .collision_groups(InteractionGroups::new(0b10, 0xFFFF))
                 .build()
         })
@@ -148,19 +173,34 @@ fn create_game_state(physics: &mut Physics, walls: &Vec<Wall>) -> GameState {
 
     GameState {
         player: Player {
-            position: Vector3::new(0., 0.5, -1.),
-            last_position: Vector3::new(0., 0., -1.),
+            position: scenario.player_start_position,
+            last_position: scenario.player_start_position,
             rigid_body_handle: player_rigid_body_handle,
             texture_index: 0,
             force_jumping: false,
+            velocity: Vector2::new(0., 0.),
+            applied_vel: Vector2::new(0., 0.),
         },
         camera: Camera {
             position: Vector3::new(0., 0., 10.),
             last_position: Vector3::new(0., 0., 10.),
             orthographic_height: 10.,
         },
-        inputs: Vec::with_capacity(9000),
     }
+}
+
+fn reset_state(game: &mut Game) {
+    game.state.player.position = game.scenario.player_start_position;
+    game.state.player.last_position = game.scenario.player_start_position;
+    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    player_rigid_body.set_linvel(vector![0.0, 0.0], true);
+    player_rigid_body.set_translation(
+        vector![
+            game.scenario.player_start_position.x,
+            game.scenario.player_start_position.y
+        ],
+        true,
+    );
 }
 
 fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
@@ -187,12 +227,32 @@ fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
 fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
+    if input.confirm && !game.is_replaying {
+        reset_state(game);
+        game.is_replaying = true;
+        game.replay_registry_index = 0;
+        game.replay_registry_count = 0;
+    }
+
     let now_micros = game.start_instant.elapsed().as_micros();
 
     update_profiler(&game.profiler);
 
     let mut update_count = 0;
     while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
+        if game.is_replaying {
+            match get_next_replay_input(game) {
+                Some(new_input) => *input = new_input,
+                None => {
+                    *input = Input {
+                        ..Default::default()
+                    }
+                }
+            };
+        } else {
+            store_input(game, input.clone());
+        }
+
         update(game, &input);
         game.last_update_micros += UPDATE_INTERVAL_MICROS;
         update_count += 1;
@@ -200,12 +260,59 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             println!("WARNING. Game is slowing down.");
             break;
         }
+
+        let (index, count, input_log) = match game.is_replaying {
+            true => (
+                game.replay_registry_index,
+                game.replay_registry_count,
+                game.inputs[game.replay_registry_index].input.clone(),
+            ),
+            false => {
+                let index = game.inputs.len() - 1 as usize;
+                (index, game.inputs[index].count, input.clone())
+            }
+        };
+
+        let player_rigid_body = &game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+        println!(
+            "[{} ({}s)] ({};{}) (->'{};{}) (->{};{}) ([{}]:{}:{})",
+            game.frame_count,
+            to_seconds(game.last_update_micros),
+            game.state.player.position.x,
+            game.state.player.position.y - 0.5,
+            game.state.player.applied_vel.x,
+            game.state.player.applied_vel.y,
+            player_rigid_body.linvel().x,
+            player_rigid_body.linvel().y,
+            index,
+            count,
+            input_log,
+        );
     }
     render(game, now_micros)?;
 
     game.last_frame_micros = now_micros;
 
     Ok(())
+}
+
+fn get_next_replay_input(game: &mut Game) -> Option<Input> {
+    if game.replay_registry_index >= game.inputs.len() {
+        return None;
+    }
+
+    game.replay_registry_count += 1;
+
+    if game.replay_registry_count > game.inputs[game.replay_registry_index].count {
+        game.replay_registry_index += 1;
+        game.replay_registry_count = 1;
+    }
+
+    if game.replay_registry_index >= game.inputs.len() {
+        return None;
+    }
+
+    Some(game.inputs[game.replay_registry_index].input.clone())
 }
 
 fn init_profiler() -> puffin_http::Server {
@@ -292,6 +399,11 @@ fn read_events<T>(
                 } => input.jump = is_pressed(state),
                 KeyboardInput {
                     state,
+                    virtual_keycode: Some(VirtualKeyCode::Return),
+                    ..
+                } => input.confirm = is_pressed(state),
+                KeyboardInput {
+                    state,
                     virtual_keycode: Some(VirtualKeyCode::F1),
                     ..
                 } => input.debug_one = is_pressed(state),
@@ -329,27 +441,23 @@ fn update(game: &mut Game, input: &Input) {
 
     game.frame_count += 1;
 
-    store_input(game, input);
     update_player(game, input);
     update_physics(game);
     update_camera(game);
 }
 
-fn store_input(game: &mut Game, input: &Input) {
-    if game.state.inputs.len() == 0 {
-        game.state.inputs.push(InputRegistry {
+fn store_input(game: &mut Game, input: Input) {
+    if game.inputs.len() == 0 {
+        game.inputs.push(InputRegistry {
             input: input.clone(),
             count: 1,
         });
     } else {
-        let last_input_index = game.state.inputs.len() - 1;
-        if game.state.inputs[last_input_index].input == *input {
-            game.state.inputs[last_input_index].count += 1;
+        let last_input_index = game.inputs.len() - 1;
+        if game.inputs[last_input_index].input == input {
+            game.inputs[last_input_index].count += 1;
         } else {
-            game.state.inputs.push(InputRegistry {
-                input: input.clone(),
-                count: 1,
-            });
+            game.inputs.push(InputRegistry { input, count: 1 });
         }
     }
 }
@@ -364,29 +472,20 @@ fn update_camera(game: &mut Game) {
 const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 16.;
 const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 8.;
 const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
-const JUMP_HEIGHT: f32 = 2.;
-const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
-const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.4;
+const JUMP_HEIGHT: f32 = 1.5;
+const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.0;
+const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.0;
 
 fn update_player(game: &mut Game, input: &Input) {
-    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    let is_grounded = is_player_grounded(game);
+    let player = &mut game.state.player;
+    let player_rigid_body = &mut game.physics.rigid_bodies[player.rigid_body_handle];
 
     let mut velocity = {
         let current_velocity = player_rigid_body.linvel();
         Vector2::new(current_velocity.x, current_velocity.y)
     };
-
-    let is_grounded = is_player_grounded(game);
-
-    if is_grounded && input.jump {
-        velocity.y = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
-            / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
-        game.state.player.force_jumping = true;
-    }
-
-    if !is_grounded && !input.jump {
-        game.state.player.force_jumping = false;
-    }
+    //let original_velocity = velocity.clone();
 
     let sign = match (input.left, input.right) {
         (true, false) => -1.,
@@ -394,28 +493,206 @@ fn update_player(game: &mut Game, input: &Input) {
         _ => 0.,
     };
 
+    let mut acceleration = Vector2::new(0., 0.);
     let horizontal_acceleration = get_horizontal_acceleration(is_grounded);
     let delta_velocity_x = horizontal_acceleration * to_seconds(UPDATE_INTERVAL_MICROS) * sign;
-    let new_velocity_x = velocity.x + delta_velocity_x;
-    if new_velocity_x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND
-        && new_velocity_x < MAX_HORIZONTAL_VELOCITY_PER_SECOND
+    if velocity.x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND
+        && velocity.x < MAX_HORIZONTAL_VELOCITY_PER_SECOND
     {
-        velocity.x = new_velocity_x;
+        velocity.x += delta_velocity_x;
+        if velocity.x > MAX_HORIZONTAL_VELOCITY_PER_SECOND {
+            velocity.x = MAX_HORIZONTAL_VELOCITY_PER_SECOND;
+        } else if velocity.x < -MAX_HORIZONTAL_VELOCITY_PER_SECOND {
+            velocity.x = -MAX_HORIZONTAL_VELOCITY_PER_SECOND;
+        }
     }
 
-    let travel_distance = match velocity.y > 0. && game.state.player.force_jumping {
+    if !is_grounded && !input.jump {
+        player.force_jumping = false;
+    }
+
+    let travel_distance = match velocity.y >= 0. && player.force_jumping {
         true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
         false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
     };
+
     let gravity = (-2.
         * JUMP_HEIGHT
         * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
         / (travel_distance * travel_distance);
-    velocity.y += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+    acceleration.y += gravity;
 
-    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    velocity += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+    if is_grounded && input.jump {
+        velocity.y = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
+            / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+
+        player.force_jumping = true;
+    }
+
+    velocity = (velocity * to_seconds(UPDATE_INTERVAL_MICROS)
+        + 0.5
+            * acceleration
+            * to_seconds(UPDATE_INTERVAL_MICROS)
+            * to_seconds(UPDATE_INTERVAL_MICROS))
+        / to_seconds(UPDATE_INTERVAL_MICROS);
+
+    //velocity += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+
+    player.applied_vel = velocity;
+    let player_rigid_body = &mut game.physics.rigid_bodies[player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
+
+#[test]
+fn jump_simple_test() {
+    const JUMP_TIME: f32 = 1.0;
+    let mut position = Vector2::new(0., 0.);
+    let mut velocity = Vector2::new(0., 0.);
+
+    velocity.y = (2. * JUMP_HEIGHT) / JUMP_TIME;
+
+    let mut frames = 0;
+    let gravity = (-2. * JUMP_HEIGHT) / (JUMP_TIME * JUMP_TIME);
+
+    loop {
+        let acceleration = gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+        position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS)
+            + 0.5 * acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+        velocity.y += acceleration;
+        frames += 1;
+        println!(
+            "[{}] ({};{})",
+            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
+            position.x,
+            position.y
+        );
+
+        if frames >= 100 {
+            break;
+        }
+    }
+}
+
+#[test]
+fn jump_test() {
+    let mut position = Vector2::new(0., 0.);
+    let mut velocity = Vector2::new(0., 0.);
+
+    let jump_velocity = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
+        / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+
+    let mut frames = 0;
+    let gravity = (-2.
+        * JUMP_HEIGHT
+        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
+        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
+    let acceleration = gravity;
+    velocity.y = jump_velocity;
+
+    loop {
+        let orig_velocity = velocity;
+        position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS)
+            + 0.5
+                * acceleration
+                * to_seconds(UPDATE_INTERVAL_MICROS)
+                * to_seconds(UPDATE_INTERVAL_MICROS);
+        velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+        //velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+        //position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS);
+        frames += 1;
+        println!(
+            "[{}] ({};{}) ({};{})->({};{})",
+            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
+            position.x,
+            position.y,
+            orig_velocity.x,
+            orig_velocity.y,
+            velocity.x,
+            velocity.y,
+        );
+
+        if frames >= 20 {
+            break;
+        }
+    }
+}
+
+#[test]
+fn jump_rapier_test() {
+    let mut position = Vector2::new(0., 0.);
+    let mut velocity = Vector2::new(0., 0.);
+
+    let jump_velocity = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
+        / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+
+    let mut frames = 0;
+    let gravity = (-2.
+        * JUMP_HEIGHT
+        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
+        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
+    let acceleration = 0.;
+    let mut true_velocity = jump_velocity;
+
+    loop {
+        let orig_velocity = velocity;
+        /*position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS)
+            + 0.5
+                * acceleration
+                * to_seconds(UPDATE_INTERVAL_MICROS)
+                * to_seconds(UPDATE_INTERVAL_MICROS);
+        velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);*/
+        velocity.y = (true_velocity * to_seconds(UPDATE_INTERVAL_MICROS)
+            + 0.5
+                * gravity
+                * to_seconds(UPDATE_INTERVAL_MICROS)
+                * to_seconds(UPDATE_INTERVAL_MICROS))
+            / to_seconds(UPDATE_INTERVAL_MICROS);
+        velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
+        position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS);
+        true_velocity += gravity * to_seconds(UPDATE_INTERVAL_MICROS);
+        frames += 1;
+        println!(
+            "[{}] ({};{}) ({};{})->({};{})",
+            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
+            position.x,
+            position.y,
+            orig_velocity.x,
+            orig_velocity.y,
+            velocity.x,
+            velocity.y,
+        );
+
+        if frames >= 20 {
+            break;
+        }
+    }
+}
+/*
+[31 (1.033323secs)] (-0.5866549;0) (->'-3.6621857;-0.94813865) (->-3.519965;0) ([1]:9:[L__])
+[32 (1.066656secs)] (-0.7199869;0.32394773) (->'-4;9.718529) (->-4;9.718529) ([2]:1:[LJ_])
+[33 (1.099989secs)] (-0.8533189;0.61629117) (->'-4;8.7703905) (->-4;8.7703905) ([2]:2:[LJ_])
+[34 (1.133322secs)] (-0.98665094;0.87703025) (->'-4;7.822252) (->-4;7.822252) ([2]:3:[LJ_])
+[35 (1.166655secs)] (-1.119983;1.106165) (->'-4;6.874113) (->-4;6.874113) ([2]:4:[LJ_])
+[36 (1.199988secs)] (-1.253315;1.3036956) (->'-4;5.9259744) (->-4;5.9259744) ([2]:5:[LJ_])
+[37 (1.233321secs)] (-1.386647;1.4696218) (->'-4;4.9778357) (->-4;4.9778357) ([2]:6:[LJ_])
+[38 (1.266654secs)] (-1.519979;1.6039436) (->'-4;4.029697) (->-4;4.029697) ([2]:7:[LJ_])
+[39 (1.299987secs)] (-1.653311;1.7066612) (->'-4;3.0815582) (->-4;3.0815582) ([2]:8:[LJ_])
+[40 (1.33332secs)] (-1.786643;1.7777746) (->'-4;2.1334195) (->-4;2.1334195) ([2]:9:[LJ_])
+[41 (1.366653secs)] (-1.919975;1.8172836) (->'-4;1.1852808) (->-4;1.1852808) ([2]:10:[LJ_])
+[42 (1.399986secs)] (-2.053307;1.8251884) (->'-4;0.23714215) (->-4;0.23714215) ([2]:11:[LJ_])
+[43 (1.433319secs)] (-2.186639;1.8014886) (->'-4;-0.7109965) (->-4;-0.7109965) ([2]:12:[LJ_])
+[44 (1.466652secs)] (-2.319971;1.7461846) (->'-4;-1.6591351) (->-4;-1.6591351) ([2]:13:[LJ_])
+[45 (1.499985secs)] (-2.453303;1.6592762) (->'-4;-2.6072738) (->-4;-2.6072738) ([2]:14:[LJ_])
+[46 (1.533318secs)] (-2.586635;1.5407636) (->'-4;-3.5554125) (->-4;-3.5554125) ([2]:15:[LJ_])
+[47 (1.566651secs)] (-2.7199671;1.3906467) (->'-4;-4.503551) (->-4;-4.503551) ([2]:16:[LJ_])
+[48 (1.599984secs)] (-2.8532991;1.2089255) (->'-4;-5.4516897) (->-4;-5.4516897) ([2]:17:[LJ_])
+[49 (1.633317secs)] (-2.9866312;0.9956) (->'-4;-6.3998284) (->-4;-6.3998284) ([2]:18:[LJ_])
+[50 (1.6666499secs)] (-3.1199632;0.7506702) (->'-4;-7.347967) (->-4;-7.347967) ([3]:1:[L__])
+[51 (1.699983secs)] (-3.2532952;0.4741361) (->'-4;-8.296105) (->-4;-8.296105) ([3]:2:[L__])
+[52 (1.733316secs)] (-3.3866272;0.16599774) (->'-4;-9.244244) (->-4;-9.244244) ([3]:3:[L__])
+[53 (1.766649secs)] (-3.5199592;-0.17374492) (->'-4;-10.192382) (->-4;-10.192382) ([3]:4:[L__])
+*/
 
 fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
     match is_grounded {
@@ -443,13 +720,6 @@ fn update_physics(game: &mut Game) {
     game.state.player.last_position = game.state.player.position;
     game.state.player.position.x = player_position_from_physics.x;
     game.state.player.position.y = player_position_from_physics.y;
-    /*println!(
-        "position: [{} ({}secs)] ({};{})",
-        game.frame_count,
-        to_seconds(game.last_update_micros),
-        game.state.player.position.x,
-        game.state.player.position.y - 0.5
-    );*/
 }
 
 fn to_seconds(micros: u128) -> f32 {
@@ -475,10 +745,10 @@ impl std::fmt::Display for Input {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "[{}] [{}] [{}]",
-            bool_to_x(self.left, "____", "LEFT"),
-            bool_to_x(self.jump, "____", "JUMP"),
-            bool_to_x(self.right, "_____", "RIGHT"),
+            "[{}{}{}]",
+            bool_to_x(self.left, "_", "L"),
+            bool_to_x(self.jump, "_", "J"),
+            bool_to_x(self.right, "_", "R"),
         )
     }
 }
