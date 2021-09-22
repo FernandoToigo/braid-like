@@ -9,16 +9,14 @@ use std::time::Instant;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::ControlFlow;
 
-const UPDATE_INTERVAL_MICROS: u128 = 33333;
-const DELTA_SECONDS: f32 = UPDATE_INTERVAL_MICROS as f32 * 1e-6;
+const DELTA_MICROS: u128 = 33333;
+const DELTA_SECONDS: f32 = DELTA_MICROS as f32 * 1e-6;
 const MAXIMUM_UPDATE_STEPS_PER_FRAME: u32 = 10;
 
 pub struct Game {
     renderer: WgpuRenderer,
-    physics: Physics,
     start_instant: Instant,
     last_frame_micros: u128,
-    frame_count: u128,
     last_update_micros: u128,
     scenario: Scenario,
     state: GameState,
@@ -35,6 +33,8 @@ pub struct Scenario {
 }
 
 pub struct GameState {
+    frame_count: u128,
+    physics: Physics,
     player: Player,
     camera: Camera,
 }
@@ -59,13 +59,14 @@ struct Input {
 }
 
 struct Player {
-    position: cgmath::Vector3<f32>,
-    last_position: cgmath::Vector3<f32>,
+    position: Vector3<f32>,
+    last_position: Vector3<f32>,
+    texture_offset: Vector2<f32>,
     texture_index: u32,
     rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
     force_jumping: bool,
-    velocity: cgmath::Vector2<f32>,
-    applied_velocity: cgmath::Vector2<f32>,
+    velocity: Vector2<f32>,
+    applied_velocity: Vector2<f32>,
 }
 
 struct Camera {
@@ -83,35 +84,17 @@ fn main() {
     env_logger::init();
 
     let profiler = init_profiler();
-    let mut physics = init_physics(DELTA_SECONDS);
+    let physics = init_physics(DELTA_SECONDS);
 
-    let scenario = Scenario {
-        player_start_position: Vector3::new(0., 0.5, -1.),
-        walls: vec![
-            Wall {
-                position: Vector3::new(0., -0.5, 0.),
-                size: Vector2::new(20., 1.),
-            },
-            Wall {
-                position: Vector3::new(1.75, 1., 0.),
-                size: Vector2::new(1., 1.),
-            },
-            Wall {
-                position: Vector3::new(-14.5, -0.5, 0.),
-                size: Vector2::new(2., 1.),
-            },
-        ],
-    };
-    let state = create_game_state(&mut physics, &scenario);
+    let scenario = create_first_scenario();
+    let state = create_game_state(physics, &scenario);
     let instances = create_instances(&state, &scenario.walls);
     let (event_loop, renderer) = block_on(WgpuRenderer::init(instances));
 
     let mut game = Game {
         renderer,
-        physics,
         start_instant: Instant::now(),
         last_frame_micros: 0,
-        frame_count: 0,
         last_update_micros: 0,
         scenario,
         state,
@@ -138,7 +121,27 @@ fn main() {
     });
 }
 
-fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
+fn create_first_scenario() -> Scenario {
+    Scenario {
+        player_start_position: Vector3::new(0., 0.0, -1.),
+        walls: vec![
+            Wall {
+                position: Vector3::new(0., -0.5, 0.),
+                size: Vector2::new(20., 1.),
+            },
+            Wall {
+                position: Vector3::new(1.75, 1., 0.),
+                size: Vector2::new(1., 1.),
+            },
+            Wall {
+                position: Vector3::new(-14.5, -0.5, 0.),
+                size: Vector2::new(2., 1.),
+            },
+        ],
+    }
+}
+
+fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
     let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
         .translation(vector![
             scenario.player_start_position.x,
@@ -149,6 +152,7 @@ fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
 
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
+        .translation(vector![0., 0.5])
         .friction(0.15)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
         .build();
@@ -173,10 +177,13 @@ fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
         });
 
     GameState {
+        frame_count: 0,
+        physics,
         player: Player {
             position: scenario.player_start_position,
             last_position: scenario.player_start_position,
             rigid_body_handle: player_rigid_body_handle,
+            texture_offset: Vector2::new(0., 0.5),
             texture_index: 0,
             force_jumping: false,
             velocity: Vector2::new(0., 0.),
@@ -193,7 +200,8 @@ fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
 fn reset_state(game: &mut Game) {
     game.state.player.position = game.scenario.player_start_position;
     game.state.player.last_position = game.scenario.player_start_position;
-    let player_rigid_body = &mut game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    let player_rigid_body =
+        &mut game.state.physics.rigid_bodies[game.state.player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![0.0, 0.0], true);
     player_rigid_body.set_translation(
         vector![
@@ -207,7 +215,7 @@ fn reset_state(game: &mut Game) {
 fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
     let mut instances = Vec::new();
     instances.push(InstanceRaw::new(
-        state.player.position,
+        state.player.position + state.player.texture_offset.extend(0.),
         Vector3::new(1., 1., 1.),
         state.player.texture_index,
     ));
@@ -240,7 +248,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
     update_profiler(&game.profiler);
 
     let mut update_count = 0;
-    while now_micros - game.last_update_micros > UPDATE_INTERVAL_MICROS {
+    while now_micros - game.last_update_micros > DELTA_MICROS {
         if game.is_replaying {
             match get_next_replay_input(game) {
                 Some(new_input) => *input = new_input,
@@ -254,8 +262,8 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             store_input(game, input.clone());
         }
 
-        update(game, &input);
-        game.last_update_micros += UPDATE_INTERVAL_MICROS;
+        update(&mut game.state, &input);
+        game.last_update_micros += DELTA_MICROS;
         update_count += 1;
         if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
             println!("WARNING. Game is slowing down.");
@@ -274,13 +282,14 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             }
         };
 
-        let player_rigid_body = &game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+        let player_rigid_body =
+            &game.state.physics.rigid_bodies[game.state.player.rigid_body_handle];
         println!(
             "[{} ({}s)] P({};{}) ->'({};{}) ->({};{}) ([{}]:{}:{})",
-            game.frame_count,
+            game.state.frame_count,
             micros_to_seconds(game.last_update_micros),
             game.state.player.position.x,
-            game.state.player.position.y - 0.5,
+            game.state.player.position.y,
             game.state.player.applied_velocity.x,
             game.state.player.applied_velocity.y,
             player_rigid_body.linvel().x,
@@ -441,14 +450,14 @@ fn is_pressed(state: &ElementState) -> bool {
     }
 }
 
-fn update(game: &mut Game, input: &Input) {
+fn update(state: &mut GameState, input: &Input) {
     puffin::profile_function!();
 
-    game.frame_count += 1;
+    update_player(state, input);
+    update_physics(state);
+    update_camera(state);
 
-    update_player(game, input);
-    update_physics(game);
-    update_camera(game);
+    state.frame_count += 1;
 }
 
 fn store_input(game: &mut Game, input: Input) {
@@ -467,8 +476,8 @@ fn store_input(game: &mut Game, input: Input) {
     }
 }
 
-fn update_camera(game: &mut Game) {
-    game.state.camera.orthographic_height = 10.;
+fn update_camera(state: &mut GameState) {
+    state.camera.orthographic_height = 10.;
     /*game.state.camera.last_position = game.state.camera.position;
     game.state.camera.position.x = game.state.player.position.x;
     game.state.camera.position.y = game.state.player.position.y + 1.;*/
@@ -481,9 +490,9 @@ const JUMP_HEIGHT: f32 = 2.0;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.3;
 
-fn update_player(game: &mut Game, input: &Input) {
-    let is_grounded = is_player_grounded(game);
-    let player = &mut game.state.player;
+fn update_player(state: &mut GameState, input: &Input) {
+    let is_grounded = is_player_grounded(state);
+    let player = &mut state.player;
 
     let sign = match (input.left, input.right) {
         (true, false) => -1.,
@@ -538,7 +547,7 @@ fn update_player(game: &mut Game, input: &Input) {
         / DELTA_SECONDS;
 
     player.applied_velocity = velocity;
-    let player_rigid_body = &mut game.physics.rigid_bodies[player.rigid_body_handle];
+    let player_rigid_body = &mut state.physics.rigid_bodies[player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
 
@@ -549,36 +558,36 @@ fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
     }
 }
 
-fn is_player_grounded(game: &mut Game) -> bool {
+fn is_player_grounded(state: &mut GameState) -> bool {
     let ray = Ray::new(
-        point!(game.state.player.position.x, game.state.player.position.y),
+        point!(state.player.position.x, state.player.position.y),
         vector![0., -1.],
     );
 
-    game.physics
-        .cast_ray(ray, 0.51, InteractionGroups::new(0b10, 0b10))
+    state
+        .physics
+        .cast_ray(ray, 0.01, InteractionGroups::new(0b10, 0b10))
         .is_some()
 }
 
-fn update_physics(game: &mut Game) {
-    game.physics.run_frame();
+fn update_physics(state: &mut GameState) {
+    state.physics.run_frame();
 
-    let player_rigid_body = &game.physics.rigid_bodies[game.state.player.rigid_body_handle];
+    let player_rigid_body = &state.physics.rigid_bodies[state.player.rigid_body_handle];
     let player_position_from_physics = player_rigid_body.translation();
-    game.state.player.last_position = game.state.player.position;
-    game.state.player.position.x = player_position_from_physics.x;
-    game.state.player.position.y = player_position_from_physics.y;
+    state.player.last_position = state.player.position;
+    state.player.position.x = player_position_from_physics.x;
+    state.player.position.y = player_position_from_physics.y;
     let velocity = player_rigid_body.linvel();
-    let changed_velocity =
-        Vector2::new(velocity.x, velocity.y) - game.state.player.applied_velocity;
-    game.state.player.velocity += changed_velocity;
+    let changed_velocity = Vector2::new(velocity.x, velocity.y) - state.player.applied_velocity;
+    state.player.velocity += changed_velocity;
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
     let micros_since_last_updated = (now_micros - game.last_update_micros) as f32;
-    let interp_percent = micros_since_last_updated / UPDATE_INTERVAL_MICROS as f32;
+    let interp_percent = micros_since_last_updated / DELTA_MICROS as f32;
 
     game.renderer.render(&game.state, interp_percent)
 }
@@ -609,6 +618,41 @@ fn bool_to_x(value: bool, false_value: &'static str, true_value: &'static str) -
 }
 
 #[test]
+fn jump_test() {
+    let physics = init_physics(DELTA_SECONDS);
+    let scenario = create_first_scenario();
+    let mut state = create_game_state(physics, &scenario);
+
+    let mut input = Input {
+        ..Default::default()
+    };
+
+    let mut max_player_y = state.player.position.y;
+
+    loop {
+        if state.frame_count > 100 {
+            input.jump = true;
+        }
+
+        update(&mut state, &input);
+
+        max_player_y = state.player.position.y.max(max_player_y);
+        println!("{} {}", state.player.position.x, state.player.position.y);
+
+        if state.frame_count > (10. / DELTA_SECONDS) as u128 {
+            break;
+        }
+    }
+
+    assert!(
+        max_player_y < JUMP_HEIGHT + 0.01 && max_player_y > JUMP_HEIGHT - 0.01,
+        "Jump did not peak near y {}. Peaked at y {}.",
+        JUMP_HEIGHT,
+        max_player_y
+    );
+}
+
+#[test]
 fn independent_jump_test() {
     let mut position = Vector2::new(0., 0.);
     let mut velocity = Vector2::new(0., 0.);
@@ -633,7 +677,7 @@ fn independent_jump_test() {
         frames += 1;
         println!(
             "[{}] P({};{}) ({};{})-V>({};{})",
-            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
+            frames as f32 * DELTA_SECONDS,
             position.x,
             position.y,
             orig_velocity.x,

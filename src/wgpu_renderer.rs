@@ -488,10 +488,10 @@ impl WgpuRenderer {
         self.update_uniforms(&game_state, interp_percent);
     }
 
-    fn update_instances(&mut self, game_state: &crate::GameState, interp_percent: f32) {
-        let render_player_position = game_state.player.last_position
-            .lerp(game_state.player.position, interp_percent);
-        self.instances[0].update(render_player_position, Vector3::new(1.0, 1.0, 1.0), game_state.player.texture_index);
+    fn update_instances(&mut self, state: &crate::GameState, interp_percent: f32) {
+        let render_player_position = state.player.last_position
+            .lerp(state.player.position, interp_percent);
+        self.instances[0].update(render_player_position + state.player.texture_offset.extend(0.), Vector3::new(1.0, 1.0, 1.0), state.player.texture_index);
 
         self.queue.write_buffer(
             &self.instance_buffer,
