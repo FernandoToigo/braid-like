@@ -65,7 +65,7 @@ struct Player {
     rigid_body_handle: rapier2d::dynamics::RigidBodyHandle,
     force_jumping: bool,
     velocity: cgmath::Vector2<f32>,
-    applied_vel: cgmath::Vector2<f32>,
+    applied_velocity: cgmath::Vector2<f32>,
 }
 
 struct Camera {
@@ -180,7 +180,7 @@ fn create_game_state(physics: &mut Physics, scenario: &Scenario) -> GameState {
             texture_index: 0,
             force_jumping: false,
             velocity: Vector2::new(0., 0.),
-            applied_vel: Vector2::new(0., 0.),
+            applied_velocity: Vector2::new(0., 0.),
         },
         camera: Camera {
             position: Vector3::new(0., 0., 10.),
@@ -281,8 +281,8 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             micros_to_seconds(game.last_update_micros),
             game.state.player.position.x,
             game.state.player.position.y - 0.5,
-            game.state.player.applied_vel.x,
-            game.state.player.applied_vel.y,
+            game.state.player.applied_velocity.x,
+            game.state.player.applied_velocity.y,
             player_rigid_body.linvel().x,
             player_rigid_body.linvel().y,
             index,
@@ -537,161 +537,10 @@ fn update_player(game: &mut Game, input: &Input) {
         + 0.5 * acceleration * DELTA_SECONDS * DELTA_SECONDS)
         / DELTA_SECONDS;
 
-    player.applied_vel = velocity;
+    player.applied_velocity = velocity;
     let player_rigid_body = &mut game.physics.rigid_bodies[player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
-
-#[test]
-fn jump_simple_test() {
-    const JUMP_TIME: f32 = 1.0;
-    let mut position = Vector2::new(0., 0.);
-    let mut velocity = Vector2::new(0., 0.);
-
-    velocity.y = (2. * JUMP_HEIGHT) / JUMP_TIME;
-
-    let mut frames = 0;
-    let gravity = (-2. * JUMP_HEIGHT) / (JUMP_TIME * JUMP_TIME);
-
-    loop {
-        let acceleration = gravity * DELTA_SECONDS;
-        position.y += velocity.y * DELTA_SECONDS + 0.5 * acceleration * DELTA_SECONDS;
-        velocity.y += acceleration;
-        frames += 1;
-        println!(
-            "[{}] ({};{})",
-            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
-            position.x,
-            position.y
-        );
-
-        if frames >= 100 {
-            break;
-        }
-    }
-}
-
-#[test]
-fn jump_test() {
-    let mut position = Vector2::new(0., 0.);
-    let mut velocity = Vector2::new(0., 0.);
-
-    let jump_velocity = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
-        / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
-
-    let mut frames = 0;
-    let gravity = (-2.
-        * JUMP_HEIGHT
-        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
-        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
-    let acceleration = gravity;
-    velocity.y = jump_velocity;
-
-    loop {
-        let orig_velocity = velocity;
-        let delta_position =
-            velocity.y * DELTA_SECONDS + 0.5 * acceleration * DELTA_SECONDS * DELTA_SECONDS;
-        position.y += delta_position;
-        println!(
-            "{} {} {} {}",
-            velocity.y,
-            acceleration,
-            delta_position,
-            acceleration * DELTA_SECONDS
-        );
-        velocity.y += acceleration * DELTA_SECONDS;
-        //velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);
-        //position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS);
-        frames += 1;
-        println!(
-            "[{}] P({};{}) ({};{})-V>({};{})",
-            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
-            position.x,
-            position.y,
-            orig_velocity.x,
-            orig_velocity.y,
-            velocity.x,
-            velocity.y,
-        );
-
-        if frames >= 20 {
-            break;
-        }
-    }
-}
-
-#[test]
-fn jump_rapier_test() {
-    let mut position = Vector2::new(0., 0.);
-    let mut velocity = Vector2::new(0., 0.);
-
-    let jump_velocity = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
-        / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
-
-    let mut frames = 0;
-    let gravity = (-2.
-        * JUMP_HEIGHT
-        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
-        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
-    let acceleration = 0.;
-    let mut true_velocity = jump_velocity;
-
-    loop {
-        let orig_velocity = velocity;
-        /*position.y += velocity.y * to_seconds(UPDATE_INTERVAL_MICROS)
-            + 0.5
-                * acceleration
-                * to_seconds(UPDATE_INTERVAL_MICROS)
-                * to_seconds(UPDATE_INTERVAL_MICROS);
-        velocity.y += acceleration * to_seconds(UPDATE_INTERVAL_MICROS);*/
-        velocity.y = (true_velocity * DELTA_SECONDS
-            + 0.5 * gravity * DELTA_SECONDS * DELTA_SECONDS)
-            / DELTA_SECONDS;
-        velocity.y += acceleration * DELTA_SECONDS;
-        position.y += velocity.y * DELTA_SECONDS;
-        true_velocity += gravity * DELTA_SECONDS;
-        frames += 1;
-        println!(
-            "[{}] ({};{}) ({};{})->({};{})",
-            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
-            position.x,
-            position.y,
-            orig_velocity.x,
-            orig_velocity.y,
-            velocity.x,
-            velocity.y,
-        );
-
-        if frames >= 20 {
-            break;
-        }
-    }
-}
-/*
-[31 (1.033323secs)] (-0.5866549;0) (->'-3.6621857;-0.94813865) (->-3.519965;0) ([1]:9:[L__])
-[32 (1.066656secs)] (-0.7199869;0.32394773) (->'-4;9.718529) (->-4;9.718529) ([2]:1:[LJ_])
-[33 (1.099989secs)] (-0.8533189;0.61629117) (->'-4;8.7703905) (->-4;8.7703905) ([2]:2:[LJ_])
-[34 (1.133322secs)] (-0.98665094;0.87703025) (->'-4;7.822252) (->-4;7.822252) ([2]:3:[LJ_])
-[35 (1.166655secs)] (-1.119983;1.106165) (->'-4;6.874113) (->-4;6.874113) ([2]:4:[LJ_])
-[36 (1.199988secs)] (-1.253315;1.3036956) (->'-4;5.9259744) (->-4;5.9259744) ([2]:5:[LJ_])
-[37 (1.233321secs)] (-1.386647;1.4696218) (->'-4;4.9778357) (->-4;4.9778357) ([2]:6:[LJ_])
-[38 (1.266654secs)] (-1.519979;1.6039436) (->'-4;4.029697) (->-4;4.029697) ([2]:7:[LJ_])
-[39 (1.299987secs)] (-1.653311;1.7066612) (->'-4;3.0815582) (->-4;3.0815582) ([2]:8:[LJ_])
-[40 (1.33332secs)] (-1.786643;1.7777746) (->'-4;2.1334195) (->-4;2.1334195) ([2]:9:[LJ_])
-[41 (1.366653secs)] (-1.919975;1.8172836) (->'-4;1.1852808) (->-4;1.1852808) ([2]:10:[LJ_])
-[42 (1.399986secs)] (-2.053307;1.8251884) (->'-4;0.23714215) (->-4;0.23714215) ([2]:11:[LJ_])
-[43 (1.433319secs)] (-2.186639;1.8014886) (->'-4;-0.7109965) (->-4;-0.7109965) ([2]:12:[LJ_])
-[44 (1.466652secs)] (-2.319971;1.7461846) (->'-4;-1.6591351) (->-4;-1.6591351) ([2]:13:[LJ_])
-[45 (1.499985secs)] (-2.453303;1.6592762) (->'-4;-2.6072738) (->-4;-2.6072738) ([2]:14:[LJ_])
-[46 (1.533318secs)] (-2.586635;1.5407636) (->'-4;-3.5554125) (->-4;-3.5554125) ([2]:15:[LJ_])
-[47 (1.566651secs)] (-2.7199671;1.3906467) (->'-4;-4.503551) (->-4;-4.503551) ([2]:16:[LJ_])
-[48 (1.599984secs)] (-2.8532991;1.2089255) (->'-4;-5.4516897) (->-4;-5.4516897) ([2]:17:[LJ_])
-[49 (1.633317secs)] (-2.9866312;0.9956) (->'-4;-6.3998284) (->-4;-6.3998284) ([2]:18:[LJ_])
-[50 (1.6666499secs)] (-3.1199632;0.7506702) (->'-4;-7.347967) (->-4;-7.347967) ([3]:1:[L__])
-[51 (1.699983secs)] (-3.2532952;0.4741361) (->'-4;-8.296105) (->-4;-8.296105) ([3]:2:[L__])
-[52 (1.733316secs)] (-3.3866272;0.16599774) (->'-4;-9.244244) (->-4;-9.244244) ([3]:3:[L__])
-[53 (1.766649secs)] (-3.5199592;-0.17374492) (->'-4;-10.192382) (->-4;-10.192382) ([3]:4:[L__])
-*/
 
 fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
     match is_grounded {
@@ -720,7 +569,8 @@ fn update_physics(game: &mut Game) {
     game.state.player.position.x = player_position_from_physics.x;
     game.state.player.position.y = player_position_from_physics.y;
     let velocity = player_rigid_body.linvel();
-    let changed_velocity = Vector2::new(velocity.x, velocity.y) - game.state.player.applied_vel;
+    let changed_velocity =
+        Vector2::new(velocity.x, velocity.y) - game.state.player.applied_velocity;
     game.state.player.velocity += changed_velocity;
 }
 
@@ -755,5 +605,45 @@ fn bool_to_x(value: bool, false_value: &'static str, true_value: &'static str) -
     match value {
         true => true_value,
         _ => false_value,
+    }
+}
+
+#[test]
+fn independent_jump_test() {
+    let mut position = Vector2::new(0., 0.);
+    let mut velocity = Vector2::new(0., 0.);
+
+    let jump_velocity = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
+        / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
+
+    let mut frames = 0;
+    let gravity = (-2.
+        * JUMP_HEIGHT
+        * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
+        / (JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE * JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE);
+    let acceleration = gravity;
+    velocity.y = jump_velocity;
+
+    loop {
+        let orig_velocity = velocity;
+        let delta_position =
+            velocity.y * DELTA_SECONDS + 0.5 * acceleration * DELTA_SECONDS * DELTA_SECONDS;
+        position.y += delta_position;
+        velocity.y += acceleration * DELTA_SECONDS;
+        frames += 1;
+        println!(
+            "[{}] P({};{}) ({};{})-V>({};{})",
+            frames as f32 * UPDATE_INTERVAL_MICROS as f32 * 1e-6,
+            position.x,
+            position.y,
+            orig_velocity.x,
+            orig_velocity.y,
+            velocity.x,
+            velocity.y,
+        );
+
+        if frames >= 20 {
+            break;
+        }
     }
 }
