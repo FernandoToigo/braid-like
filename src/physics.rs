@@ -14,14 +14,14 @@ pub struct Physics {
     query_pipeline: QueryPipeline,
 }
 
-pub fn init_physics(time_step_micros: u128) -> Physics {
+pub fn init_physics(step_delta_seconds: f32) -> Physics {
     let rigid_bodies = RigidBodySet::new();
     let colliders = ColliderSet::new();
 
     //let gravity = vector![0.0, -9.81];
     let gravity = vector![0.0, 0.0];
     let mut integration_parameters = IntegrationParameters::default();
-    integration_parameters.dt = time_step_micros as f32 / 1e6;
+    integration_parameters.dt = step_delta_seconds;
     let pipeline = PhysicsPipeline::new();
     let island_manager = IslandManager::new();
     let broad_phase = BroadPhase::new();
