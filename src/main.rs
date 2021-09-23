@@ -164,6 +164,18 @@ fn create_first_scenario() -> Scenario {
     }
 }
 
+#[cfg(test)]
+fn create_test_scenario() -> Scenario {
+    Scenario {
+        player_start_position: Vector3::new(0., 0., -1.),
+        walls: vec![Wall {
+            // Floor
+            position: Vector3::new(0., -0.5, 0.),
+            size: Vector2::new(100., 1.0),
+        }],
+    }
+}
+
 fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
     let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
         .translation(vector![
@@ -663,7 +675,7 @@ fn bool_to_x(value: bool, false_value: &'static str, true_value: &'static str) -
 #[test]
 fn jump_height_test() {
     let physics = init_physics(DELTA_SECONDS);
-    let scenario = create_first_scenario();
+    let scenario = create_test_scenario();
     let mut state = create_game_state(physics, &scenario);
     let mut max_player_y = 0.;
 
@@ -693,7 +705,7 @@ fn jump_height_test() {
 #[test]
 fn jump_distance_test() {
     let physics = init_physics(DELTA_SECONDS);
-    let scenario = create_first_scenario();
+    let scenario = create_test_scenario();
     let mut state = create_game_state(physics, &scenario);
 
     let mut input = Input {
