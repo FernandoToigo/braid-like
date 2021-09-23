@@ -186,6 +186,7 @@ impl WgpuRenderer {
     pub async fn init(instances: Vec<InstanceRaw>) -> (winit::event_loop::EventLoop<()>, Self) {
         let event_loop = winit::event_loop::EventLoop::new();
         let window = winit::window::WindowBuilder::new()
+            .with_inner_size(winit::dpi::PhysicalSize::new(1024, 768))
             .with_title("braid-like")
             .build(&event_loop)
             .unwrap();
@@ -237,7 +238,7 @@ impl WgpuRenderer {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
-                        count: NonZeroU32::new(3),
+                        count: NonZeroU32::new(2), // Count of different textures on the array.
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
@@ -257,8 +258,6 @@ impl WgpuRenderer {
         let player_texture = Texture::from_bytes(&device, &queue, player_texture_bytes, "Player").unwrap();
         let ground_texture_bytes = include_bytes!("..\\res\\sprites\\Ground.png");
         let ground_texture = Texture::from_bytes(&device, &queue, ground_texture_bytes, "Ground").unwrap();
-        let cat_texture_bytes = include_bytes!("..\\res\\sprites\\Cat.png");
-        let cat_texture= Texture::from_bytes(&device, &queue, cat_texture_bytes, "Cat").unwrap();
 
         let textures_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
@@ -268,8 +267,7 @@ impl WgpuRenderer {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureViewArray(&[
                             &player_texture.view,
-                            &ground_texture.view,
-                            &cat_texture.view]),
+                            &ground_texture.view]),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
