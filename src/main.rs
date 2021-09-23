@@ -485,38 +485,77 @@ const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
 const JUMP_HEIGHT: f32 = 2.0;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.3;
+const JUMP_VELOCITY: f32 =
+    (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND) / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
 
 fn update_player(state: &mut GameState, input: &Input) {
     let is_grounded = is_player_grounded(state);
     let player = &mut state.player;
 
+    if !is_grounded && !input.jump {
+        player.force_jumping = false;
+    }
+
+    let mut acceleration = Vector2::new(0., 0.);
+    acceleration.x = get_horizontal_acceleration(player, input, is_grounded);
+    acceleration.y = get_vertical_acceleration(player);
+
+    player.velocity += acceleration * DELTA_SECONDS;
+
+    if is_grounded && input.jump {
+        player.velocity.y = JUMP_VELOCITY;
+        player.force_jumping = true;
+    }
+
+    // Do our own integration. We know the position we want the player to go, so we just set the
+    // velocity to the value we know will produce a translation to the position we want.
+    let velocity = integrate_velocity_to_delta_position(player, acceleration) / DELTA_SECONDS;
+
+    set_physics_velocity(state, velocity);
+}
+
+fn set_physics_velocity(state: &mut GameState, velocity: Vector2<f32>) {
+    state.player.applied_velocity = velocity;
+    let player_rigid_body = &mut state.physics.rigid_bodies[state.player.rigid_body_handle];
+    player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
+}
+
+fn integrate_velocity_to_delta_position(
+    player: &Player,
+    acceleration: Vector2<f32>,
+) -> Vector2<f32> {
+    player.velocity * DELTA_SECONDS + 0.5 * acceleration * DELTA_SECONDS * DELTA_SECONDS
+}
+
+fn get_horizontal_acceleration(player: &mut Player, input: &Input, is_grounded: bool) -> f32 {
     let sign = match (input.left, input.right) {
         (true, false) => -1.,
         (false, true) => 1.,
         _ => 0.,
     };
 
-    let mut acceleration = Vector2::new(0., 0.);
-    let horizontal_acceleration = get_horizontal_acceleration(is_grounded);
+    let horizontal_acceleration = match is_grounded {
+        true => HORIZONTAL_ACCELERATION_PER_SECOND,
+        false => JUMP_HORIZONTAL_ACCELERATION_PER_SECOND,
+    };
+
     if player.velocity.x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND
         && player.velocity.x < MAX_HORIZONTAL_VELOCITY_PER_SECOND
     {
         let delta_velocity_x = horizontal_acceleration * DELTA_SECONDS * sign;
         if player.velocity.x + delta_velocity_x > MAX_HORIZONTAL_VELOCITY_PER_SECOND {
-            acceleration.x =
-                (MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
+            return (MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
         } else if player.velocity.x + delta_velocity_x < -MAX_HORIZONTAL_VELOCITY_PER_SECOND {
-            acceleration.x =
-                (-MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
-        } else {
-            acceleration.x = horizontal_acceleration * sign;
+            return (-MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
         }
+
+        return horizontal_acceleration * sign;
     }
 
-    if !is_grounded && !input.jump {
-        player.force_jumping = false;
-    }
+    0.
+}
 
+fn get_vertical_acceleration(player: &Player) -> f32 {
     let travel_distance = match player.velocity.y >= 0. && player.force_jumping {
         true => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE,
         false => JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING,
@@ -526,32 +565,8 @@ fn update_player(state: &mut GameState, input: &Input) {
         * JUMP_HEIGHT
         * (MAX_HORIZONTAL_VELOCITY_PER_SECOND * MAX_HORIZONTAL_VELOCITY_PER_SECOND))
         / (travel_distance * travel_distance);
-    acceleration.y += gravity;
 
-    player.velocity += acceleration * DELTA_SECONDS;
-    if is_grounded && input.jump {
-        player.velocity.y = (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND)
-            / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
-
-        player.force_jumping = true;
-    }
-
-    // Do our own integration. We know the position we want the player to go, so we just set the
-    // velocity to the value we know will produce a translation to the position we want.
-    let velocity = (player.velocity * DELTA_SECONDS
-        + 0.5 * acceleration * DELTA_SECONDS * DELTA_SECONDS)
-        / DELTA_SECONDS;
-
-    player.applied_velocity = velocity;
-    let player_rigid_body = &mut state.physics.rigid_bodies[player.rigid_body_handle];
-    player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
-}
-
-fn get_horizontal_acceleration(is_grounded: bool) -> f32 {
-    match is_grounded {
-        true => HORIZONTAL_ACCELERATION_PER_SECOND,
-        false => JUMP_HORIZONTAL_ACCELERATION_PER_SECOND,
-    }
+    gravity
 }
 
 fn is_player_grounded(state: &mut GameState) -> bool {
