@@ -127,15 +127,11 @@ fn create_first_scenario() -> Scenario {
         walls: vec![
             Wall {
                 position: Vector3::new(0., -0.5, 0.),
-                size: Vector2::new(20., 1.),
+                size: Vector2::new(100., 1.),
             },
             Wall {
-                position: Vector3::new(1.75, 1., 0.),
+                position: Vector3::new(-1.75, 1., 0.),
                 size: Vector2::new(1., 1.),
-            },
-            Wall {
-                position: Vector3::new(-14.5, -0.5, 0.),
-                size: Vector2::new(2., 1.),
             },
         ],
     }
@@ -618,38 +614,84 @@ fn bool_to_x(value: bool, false_value: &'static str, true_value: &'static str) -
 }
 
 #[test]
-fn jump_test() {
+fn jump_height_test() {
     let physics = init_physics(DELTA_SECONDS);
     let scenario = create_first_scenario();
     let mut state = create_game_state(physics, &scenario);
+    let mut max_player_y = 0.;
 
-    let mut input = Input {
+    let input = Input {
+        jump: true,
         ..Default::default()
     };
 
-    let mut max_player_y = state.player.position.y;
-
     loop {
-        if state.frame_count > 100 {
-            input.jump = true;
-        }
-
         update(&mut state, &input);
 
         max_player_y = state.player.position.y.max(max_player_y);
         println!("{} {}", state.player.position.x, state.player.position.y);
-
         if state.frame_count > (10. / DELTA_SECONDS) as u128 {
             break;
         }
     }
 
     assert!(
-        max_player_y < JUMP_HEIGHT + 0.01 && max_player_y > JUMP_HEIGHT - 0.01,
+        are_approximate(max_player_y, JUMP_HEIGHT),
         "Jump did not peak near y {}. Peaked at y {}.",
         JUMP_HEIGHT,
         max_player_y
     );
+}
+
+#[test]
+fn jump_distance_test() {
+    let physics = init_physics(DELTA_SECONDS);
+    let scenario = create_first_scenario();
+    let mut state = create_game_state(physics, &scenario);
+
+    let mut input = Input {
+        right: true,
+        ..Default::default()
+    };
+
+    let mut jump_start_x = 0.;
+    let mut last_player_position = state.player.position;
+    loop {
+        if state.frame_count > (1. / DELTA_SECONDS) as u128 {
+            if !input.jump {
+                jump_start_x = state.player.position.x;
+            }
+            input.jump = true;
+        }
+
+        update(&mut state, &input);
+
+        if input.jump && state.player.position.y < 0.01 {
+            let min_distance = last_player_position.x - jump_start_x;
+            let max_distance = state.player.position.x - jump_start_x;
+            let required_distance =
+                JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE + JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING;
+
+            assert!(
+                min_distance < required_distance && max_distance > required_distance,
+                "Not enough distance traveled while jumping. Incorret: {} <- {} -> {}.",
+                min_distance,
+                required_distance,
+                max_distance,
+            );
+            break;
+        }
+        last_player_position = state.player.position;
+
+        if state.frame_count > (10. / DELTA_SECONDS) as u128 {
+            break;
+        }
+    }
+}
+
+#[cfg(test)]
+fn are_approximate(a: f32, b: f32) -> bool {
+    (a - b).abs() < 0.01
 }
 
 #[test]
