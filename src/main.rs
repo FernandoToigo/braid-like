@@ -29,6 +29,7 @@ pub struct Game {
 
 pub struct Scenario {
     player_start_position: Vector3<f32>,
+    player_clone_start_position: Vector3<f32>,
     walls: Vec<Wall>,
 }
 
@@ -36,6 +37,7 @@ pub struct GameState {
     frame_count: u128,
     physics: Physics,
     player: Player,
+    player_clone: Player,
     camera: Camera,
 }
 
@@ -123,7 +125,8 @@ fn main() {
 
 fn create_first_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-3., 0.0, -1.),
+        player_start_position: Vector3::new(-4.83333, -4.5, -1.),
+        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
         walls: vec![
             Wall {
                 // Floor
@@ -168,6 +171,7 @@ fn create_first_scenario() -> Scenario {
 fn create_test_scenario() -> Scenario {
     Scenario {
         player_start_position: Vector3::new(0., 0., -1.),
+        player_clone_start_position: Vector3::new(10., 0., -1.),
         walls: vec![Wall {
             // Floor
             position: Vector3::new(0., -0.5, 0.),
@@ -185,7 +189,6 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
         .lock_rotations()
         .build();
     let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
-
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
         .translation(vector![0., 0.5])
         .friction(0.15)
@@ -194,6 +197,25 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
     physics.colliders.insert_with_parent(
         collider,
         player_rigid_body_handle,
+        &mut physics.rigid_bodies,
+    );
+
+    let player_clone_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
+        .translation(vector![
+            scenario.player_clone_start_position.x,
+            scenario.player_clone_start_position.y
+        ])
+        .lock_rotations()
+        .build();
+    let player_clone_rigid_body_handle = physics.rigid_bodies.insert(player_clone_rigid_body);
+    let collider = ColliderBuilder::cuboid(0.25, 0.5)
+        .translation(vector![0., 0.5])
+        .friction(0.15)
+        .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
+        .build();
+    physics.colliders.insert_with_parent(
+        collider,
+        player_clone_rigid_body_handle,
         &mut physics.rigid_bodies,
     );
 
@@ -218,6 +240,16 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
             position: scenario.player_start_position,
             last_position: scenario.player_start_position,
             rigid_body_handle: player_rigid_body_handle,
+            texture_offset: Vector2::new(0., 0.5),
+            texture_index: 0,
+            force_jumping: false,
+            velocity: Vector2::new(0., 0.),
+            applied_velocity: Vector2::new(0., 0.),
+        },
+        player_clone: Player {
+            position: scenario.player_clone_start_position,
+            last_position: scenario.player_clone_start_position,
+            rigid_body_handle: player_clone_rigid_body_handle,
             texture_offset: Vector2::new(0., 0.5),
             texture_index: 0,
             force_jumping: false,
@@ -256,6 +288,11 @@ fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
         Vector3::new(1., 1., 1.),
         state.player.texture_index,
     ));
+    instances.push(InstanceRaw::new(
+        state.player_clone.position + state.player_clone.texture_offset.extend(0.),
+        Vector3::new(1., 1., 1.),
+        state.player_clone.texture_index,
+    ));
 
     walls
         .iter()
@@ -268,10 +305,6 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
     puffin::profile_function!();
 
     if input.confirm && !game.is_replaying {
-        println!(
-            "BEFORE {} {}",
-            game.state.player.position.x, game.state.player.position.y
-        );
         reset_state(game);
         game.is_replaying = true;
         game.replay_registry_index = 0;
@@ -288,10 +321,6 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             match get_next_replay_input(game) {
                 Some(new_input) => *input = new_input,
                 None => {
-                    println!(
-                        "AFTER {} {}",
-                        game.state.player.position.x, game.state.player.position.y
-                    );
                     game.is_replaying = false;
                     game.inputs.clear();
                     store_input(game, input.clone());
@@ -339,8 +368,8 @@ fn print_update_log(game: &Game, input: &Input) {
         index,
         count,
         input_log,
-        game.state.player.position.x,
-        game.state.player.position.y,
+        game.state.player_clone.position.x,
+        game.state.player_clone.position.y,
         game.state.player.velocity.x,
         game.state.player.velocity.y,
     );
@@ -628,14 +657,19 @@ fn is_player_grounded(state: &mut GameState) -> bool {
 fn update_physics(state: &mut GameState) {
     state.physics.run_frame();
 
-    let player_rigid_body = &state.physics.rigid_bodies[state.player.rigid_body_handle];
+    update_player_physics(&mut state.player, &state.physics);
+    update_player_physics(&mut state.player_clone, &state.physics);
+}
+
+fn update_player_physics(player: &mut Player, physics: &Physics) {
+    let player_rigid_body = &physics.rigid_bodies[player.rigid_body_handle];
     let player_position_from_physics = player_rigid_body.translation();
-    state.player.last_position = state.player.position;
-    state.player.position.x = player_position_from_physics.x;
-    state.player.position.y = player_position_from_physics.y;
+    player.last_position = player.position;
+    player.position.x = player_position_from_physics.x;
+    player.position.y = player_position_from_physics.y;
     let velocity = player_rigid_body.linvel();
-    let changed_velocity = Vector2::new(velocity.x, velocity.y) - state.player.applied_velocity;
-    state.player.velocity += changed_velocity;
+    let changed_velocity = Vector2::new(velocity.x, velocity.y) - player.applied_velocity;
+    player.velocity += changed_velocity;
 }
 
 fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {

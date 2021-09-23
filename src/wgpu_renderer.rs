@@ -4,6 +4,7 @@ use wgpu::util::DeviceExt;
 use cgmath::SquareMatrix;
 use image::GenericImageView;
 use cgmath::{VectorSpace, Vector3, Matrix4, One};
+use crate::{GameState, Player};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -406,7 +407,7 @@ impl WgpuRenderer {
         self.depth_texture = Texture::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
     }
 
-    pub fn render(&mut self, game_state: &crate::GameState, interp_percent: f32) -> Result<(), wgpu::SurfaceError> {
+    pub fn render(&mut self, game_state: &GameState, interp_percent: f32) -> Result<(), wgpu::SurfaceError> {
         self.update_buffers(&game_state, interp_percent);
         self.render_frame()
     }
@@ -478,7 +479,7 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    fn update_buffers(&mut self, game_state: &crate::GameState, interp_percent: f32) {
+    fn update_buffers(&mut self, game_state: &GameState, interp_percent: f32) {
         puffin::profile_function!();
 
         // @Performance: only update buffers if the values were changed.
@@ -486,10 +487,12 @@ impl WgpuRenderer {
         self.update_uniforms(&game_state, interp_percent);
     }
 
-    fn update_instances(&mut self, state: &crate::GameState, interp_percent: f32) {
-        let render_player_position = state.player.last_position
+    fn update_instances(&mut self, state: &GameState, interp_percent: f32) {
+        /*let render_player_position = state.player.last_position
             .lerp(state.player.position, interp_percent);
-        self.instances[0].update(render_player_position + state.player.texture_offset.extend(0.), Vector3::new(1.0, 1.0, 1.0), state.player.texture_index);
+        self.instances[0].update(render_player_position + state.player.texture_offset.extend(0.), Vector3::new(1.0, 1.0, 1.0), state.player.texture_index);*/
+        self.update_player_instance(&state.player, interp_percent, 0);
+        self.update_player_instance(&state.player_clone, interp_percent, 1);
 
         self.queue.write_buffer(
             &self.instance_buffer,
@@ -497,7 +500,13 @@ impl WgpuRenderer {
             bytemuck::cast_slice(&self.instances));
     }
 
-    fn update_uniforms(&mut self, game_state: &crate::GameState, interp_percent: f32) {
+    fn update_player_instance(&mut self, player: &Player, interp_percent: f32, instance_index: usize) {
+        let render_player_position = player.last_position
+            .lerp(player.position, interp_percent);
+        self.instances[instance_index].update(render_player_position + player.texture_offset.extend(0.), Vector3::new(1.0, 1.0, 1.0), player.texture_index);
+    }
+
+    fn update_uniforms(&mut self, game_state: &GameState, interp_percent: f32) {
         let mut uniforms = Uniforms::new();
         let render_camera_position = game_state.camera.last_position.lerp(game_state.camera.position, interp_percent);
         let camera_position = cgmath::Point3::new(render_camera_position.x, render_camera_position.y, render_camera_position.z);
