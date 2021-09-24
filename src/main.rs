@@ -190,7 +190,7 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
         .map(|wall| {
             ColliderBuilder::cuboid(wall.size.x * 0.5, wall.size.y * 0.5)
                 .translation(vector!(wall.position.x, wall.position.y))
-                .friction(0.15)
+                .friction(0.3)
                 .collision_groups(InteractionGroups::new(0b10, 0xFFFF))
                 .build()
         })
@@ -219,7 +219,7 @@ fn create_player(physics: &mut Physics, start_position: Vector3<f32>) -> Player 
     let rigid_body_handle = physics.rigid_bodies.insert(rigid_body);
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
         .translation(vector![0., 0.5])
-        .friction(0.15)
+        .friction(0.3)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
         .build();
     physics
@@ -535,8 +535,8 @@ fn update_camera(state: &mut GameState) {
     game.state.camera.position.y = game.state.player.position.y + 1.;*/
 }
 
-const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 16.;
-const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 8.;
+const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 25.;
+const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 12.5;
 const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
 const JUMP_HEIGHT: f32 = 2.0;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
