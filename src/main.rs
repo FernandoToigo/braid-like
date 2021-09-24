@@ -181,43 +181,8 @@ fn create_test_scenario() -> Scenario {
 }
 
 fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
-    let player_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
-        .translation(vector![
-            scenario.player_start_position.x,
-            scenario.player_start_position.y
-        ])
-        .lock_rotations()
-        .build();
-    let player_rigid_body_handle = physics.rigid_bodies.insert(player_rigid_body);
-    let collider = ColliderBuilder::cuboid(0.25, 0.5)
-        .translation(vector![0., 0.5])
-        .friction(0.15)
-        .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
-        .build();
-    physics.colliders.insert_with_parent(
-        collider,
-        player_rigid_body_handle,
-        &mut physics.rigid_bodies,
-    );
-
-    let player_clone_rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
-        .translation(vector![
-            scenario.player_clone_start_position.x,
-            scenario.player_clone_start_position.y
-        ])
-        .lock_rotations()
-        .build();
-    let player_clone_rigid_body_handle = physics.rigid_bodies.insert(player_clone_rigid_body);
-    let collider = ColliderBuilder::cuboid(0.25, 0.5)
-        .translation(vector![0., 0.5])
-        .friction(0.15)
-        .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
-        .build();
-    physics.colliders.insert_with_parent(
-        collider,
-        player_clone_rigid_body_handle,
-        &mut physics.rigid_bodies,
-    );
+    let player = create_player(&mut physics, scenario.player_start_position);
+    let player_clone = create_player(&mut physics, scenario.player_clone_start_position);
 
     scenario
         .walls
@@ -236,31 +201,40 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
     GameState {
         frame_count: 0,
         physics,
-        player: Player {
-            position: scenario.player_start_position,
-            last_position: scenario.player_start_position,
-            rigid_body_handle: player_rigid_body_handle,
-            texture_offset: Vector2::new(0., 0.5),
-            texture_index: 0,
-            force_jumping: false,
-            velocity: Vector2::new(0., 0.),
-            applied_velocity: Vector2::new(0., 0.),
-        },
-        player_clone: Player {
-            position: scenario.player_clone_start_position,
-            last_position: scenario.player_clone_start_position,
-            rigid_body_handle: player_clone_rigid_body_handle,
-            texture_offset: Vector2::new(0., 0.5),
-            texture_index: 0,
-            force_jumping: false,
-            velocity: Vector2::new(0., 0.),
-            applied_velocity: Vector2::new(0., 0.),
-        },
+        player,
+        player_clone,
         camera: Camera {
             position: Vector3::new(0., 0., 10.),
             last_position: Vector3::new(0., 0., 10.),
             orthographic_height: 10.,
         },
+    }
+}
+
+fn create_player(physics: &mut Physics, start_position: Vector3<f32>) -> Player {
+    let rigid_body = rapier2d::dynamics::RigidBodyBuilder::new_dynamic()
+        .translation(vector![start_position.x, start_position.y])
+        .lock_rotations()
+        .build();
+    let rigid_body_handle = physics.rigid_bodies.insert(rigid_body);
+    let collider = ColliderBuilder::cuboid(0.25, 0.5)
+        .translation(vector![0., 0.5])
+        .friction(0.15)
+        .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
+        .build();
+    physics
+        .colliders
+        .insert_with_parent(collider, rigid_body_handle, &mut physics.rigid_bodies);
+
+    Player {
+        position: start_position,
+        last_position: start_position,
+        rigid_body_handle,
+        texture_offset: Vector2::new(0., 0.5),
+        texture_index: 0,
+        force_jumping: false,
+        velocity: Vector2::new(0., 0.),
+        applied_velocity: Vector2::new(0., 0.),
     }
 }
 
