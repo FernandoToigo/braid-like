@@ -126,7 +126,7 @@ fn main() {
 fn create_first_scenario() -> Scenario {
     Scenario {
         player_start_position: Vector3::new(-4.83333, -4.5, -1.),
-        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
+        player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
         walls: vec![
             Wall {
                 // Floor
@@ -265,20 +265,26 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
 }
 
 fn reset_state(game: &mut Game) {
-    game.state.player.velocity = Vector2::new(0., 0.);
-    game.state.player.applied_velocity = Vector2::new(0., 0.);
-    game.state.player.position = game.scenario.player_start_position;
-    game.state.player.last_position = game.scenario.player_start_position;
-    let player_rigid_body =
-        &mut game.state.physics.rigid_bodies[game.state.player.rigid_body_handle];
-    player_rigid_body.set_linvel(vector![0.0, 0.0], true);
-    player_rigid_body.set_translation(
-        vector![
-            game.scenario.player_start_position.x,
-            game.scenario.player_start_position.y
-        ],
-        true,
+    reset_player(
+        &mut game.state.physics,
+        &mut game.state.player,
+        game.scenario.player_start_position,
     );
+    reset_player(
+        &mut game.state.physics,
+        &mut game.state.player_clone,
+        game.scenario.player_clone_start_position,
+    );
+}
+
+fn reset_player(physics: &mut Physics, player: &mut Player, start_position: Vector3<f32>) {
+    player.velocity = Vector2::new(0., 0.);
+    player.applied_velocity = Vector2::new(0., 0.);
+    player.position = start_position;
+    player.last_position = start_position;
+    let player_rigid_body = &mut physics.rigid_bodies[player.rigid_body_handle];
+    player_rigid_body.set_linvel(vector![0.0, 0.0], true);
+    player_rigid_body.set_translation(vector![start_position.x, start_position.y], true);
 }
 
 fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
@@ -331,7 +337,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
             store_input(game, input.clone());
         }
 
-        update(&mut game.state, &input);
+        update(&mut game.state, &input, game.is_replaying);
         game.last_update_micros += DELTA_MICROS;
         update_count += 1;
         if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
@@ -519,10 +525,13 @@ fn is_pressed(state: &ElementState) -> bool {
     }
 }
 
-fn update(state: &mut GameState, input: &Input) {
+fn update(state: &mut GameState, input: &Input, update_clone: bool) {
     puffin::profile_function!();
 
-    update_player(state, input);
+    update_player(&mut state.physics, &mut state.player, input);
+    if update_clone {
+        update_player(&mut state.physics, &mut state.player_clone, input);
+    }
     update_physics(state);
     update_camera(state);
 
@@ -561,9 +570,8 @@ const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE_FALLING: f32 = 1.3;
 const JUMP_VELOCITY: f32 =
     (2. * JUMP_HEIGHT * MAX_HORIZONTAL_VELOCITY_PER_SECOND) / JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE;
 
-fn update_player(state: &mut GameState, input: &Input) {
-    let is_grounded = is_player_grounded(state);
-    let player = &mut state.player;
+fn update_player(physics: &mut Physics, player: &mut Player, input: &Input) {
+    let is_grounded = is_player_grounded(physics, player);
 
     if !is_grounded && !input.jump {
         player.force_jumping = false;
@@ -584,12 +592,12 @@ fn update_player(state: &mut GameState, input: &Input) {
     // velocity to the value we know will produce a translation to the position we want.
     let velocity = integrate_velocity_to_delta_position(player, acceleration) / DELTA_SECONDS;
 
-    set_physics_velocity(state, velocity);
+    set_physics_velocity(physics, player, velocity);
 }
 
-fn set_physics_velocity(state: &mut GameState, velocity: Vector2<f32>) {
-    state.player.applied_velocity = velocity;
-    let player_rigid_body = &mut state.physics.rigid_bodies[state.player.rigid_body_handle];
+fn set_physics_velocity(physics: &mut Physics, player: &mut Player, velocity: Vector2<f32>) {
+    player.applied_velocity = velocity;
+    let player_rigid_body = &mut physics.rigid_bodies[player.rigid_body_handle];
     player_rigid_body.set_linvel(vector![velocity.x, velocity.y], true);
 }
 
@@ -642,14 +650,13 @@ fn get_vertical_acceleration(player: &Player) -> f32 {
     gravity
 }
 
-fn is_player_grounded(state: &mut GameState) -> bool {
+fn is_player_grounded(physics: &mut Physics, player: &Player) -> bool {
     let ray = Ray::new(
-        point!(state.player.position.x, state.player.position.y),
+        point!(player.position.x, player.position.y),
         vector![0., -1.],
     );
 
-    state
-        .physics
+    physics
         .cast_ray(ray, 0.01, InteractionGroups::new(0b10, 0b10))
         .is_some()
 }
@@ -719,7 +726,7 @@ fn jump_height_test() {
     };
 
     loop {
-        update(&mut state, &input);
+        update(&mut state, &input, false);
 
         max_player_y = state.player.position.y.max(max_player_y);
         println!("{} {}", state.player.position.x, state.player.position.y);
@@ -757,7 +764,7 @@ fn jump_distance_test() {
             input.jump = true;
         }
 
-        update(&mut state, &input);
+        update(&mut state, &input, false);
 
         if input.jump && state.player.position.y < 0.01 {
             let min_distance = last_player_position.x - jump_start_x;
