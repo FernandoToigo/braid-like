@@ -12,6 +12,8 @@ pub struct Physics {
     joints: JointSet,
     ccd_solver: CCDSolver,
     query_pipeline: QueryPipeline,
+    event_handler: PhysicsEventHandler,
+    intersections: Option<Vec<IntersectionEvent>>,
 }
 
 pub fn init_physics(step_delta_seconds: f32) -> Physics {
@@ -29,6 +31,7 @@ pub fn init_physics(step_delta_seconds: f32) -> Physics {
     let joints = JointSet::new();
     let ccd_solver = CCDSolver::new();
     let query_pipeline = QueryPipeline::new();
+    let event_handler = PhysicsEventHandler::new();
 
     Physics {
         rigid_bodies,
@@ -42,13 +45,43 @@ pub fn init_physics(step_delta_seconds: f32) -> Physics {
         joints,
         ccd_solver,
         query_pipeline,
+        event_handler,
+        intersections: Some(Vec::with_capacity(10)),
+    }
+}
+
+struct PhysicsEventHandler {
+    intersections: std::sync::Mutex<Option<Vec<IntersectionEvent>>>,
+}
+
+impl PhysicsEventHandler {
+    fn new() -> Self {
+        PhysicsEventHandler {
+            intersections: std::sync::Mutex::new(None),
+        }
+    }
+}
+
+impl EventHandler for PhysicsEventHandler {
+    fn handle_intersection_event(&self, event: IntersectionEvent) {
+        self.intersections
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .push(event);
+    }
+    fn handle_contact_event(&self, _: ContactEvent, _: &ContactPair) {
+        todo!();
     }
 }
 
 impl Physics {
     pub fn run_frame(&mut self) {
         let physics_hooks = ();
-        let event_handler = ();
+        self.intersections.as_mut().unwrap().clear();
+        let intersections = std::mem::replace(&mut self.intersections, None);
+        *self.event_handler.intersections.lock().unwrap() = intersections;
 
         self.pipeline.step(
             &self.gravity,
@@ -61,8 +94,16 @@ impl Physics {
             &mut self.joints,
             &mut self.ccd_solver,
             &physics_hooks,
-            &event_handler,
+            &mut self.event_handler,
         );
+
+        let intersections =
+            std::mem::replace(&mut *self.event_handler.intersections.lock().unwrap(), None);
+        self.intersections = Some(intersections.unwrap());
+    }
+
+    pub fn last_step_intersections(&self) -> &Vec<IntersectionEvent> {
+        self.intersections.as_ref().unwrap()
     }
 
     pub fn cast_ray(

@@ -30,6 +30,7 @@ pub struct Game {
 pub struct Scenario {
     player_start_position: Vector3<f32>,
     player_clone_start_position: Vector3<f32>,
+    finish_position: Vector3<f32>,
     walls: Vec<Wall>,
 }
 
@@ -39,6 +40,7 @@ pub struct GameState {
     player: Player,
     player_clone: Player,
     camera: Camera,
+    finish_collider_handle: ColliderHandle,
 }
 
 struct InputRegistry {
@@ -58,6 +60,11 @@ struct Input {
     jump: bool,
     confirm: bool,
     debug_one: bool,
+}
+
+enum UpdateResult {
+    None,
+    FinishedScenario,
 }
 
 struct Player {
@@ -90,7 +97,7 @@ fn main() {
 
     let scenario = create_first_scenario();
     let state = create_game_state(physics, &scenario);
-    let instances = create_instances(&state, &scenario.walls);
+    let instances = create_instances(&state, &scenario.walls, &scenario);
     let (event_loop, renderer) = block_on(WgpuRenderer::init(instances));
 
     let mut game = Game {
@@ -127,6 +134,7 @@ fn create_first_scenario() -> Scenario {
     Scenario {
         player_start_position: Vector3::new(-4.83333, -4.5, -1.),
         player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
+        finish_position: Vector3::new(4.83333, -4.3, 1.),
         walls: vec![
             Wall {
                 // Floor
@@ -172,6 +180,7 @@ fn create_test_scenario() -> Scenario {
     Scenario {
         player_start_position: Vector3::new(0., 0., -1.),
         player_clone_start_position: Vector3::new(10., 0., -1.),
+        finish_position: Vector3::new(10., 0., 0.),
         walls: vec![Wall {
             // Floor
             position: Vector3::new(0., -0.5, 0.),
@@ -183,6 +192,16 @@ fn create_test_scenario() -> Scenario {
 fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
     let player = create_player(&mut physics, scenario.player_start_position);
     let player_clone = create_player(&mut physics, scenario.player_clone_start_position);
+
+    let finish_collider = ColliderBuilder::cuboid(0.25, 0.25)
+        .translation(vector!(
+            scenario.finish_position.x,
+            scenario.finish_position.y
+        ))
+        .active_events(ActiveEvents::INTERSECTION_EVENTS)
+        .sensor(true)
+        .build();
+    let finish_collider_handle = physics.colliders.insert(finish_collider);
 
     scenario
         .walls
@@ -208,6 +227,7 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
             last_position: Vector3::new(0., 0., 10.),
             orthographic_height: 10.,
         },
+        finish_collider_handle,
     }
 }
 
@@ -261,7 +281,10 @@ fn reset_player(physics: &mut Physics, player: &mut Player, start_position: Vect
     player_rigid_body.set_translation(vector![start_position.x, start_position.y], true);
 }
 
-fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
+fn create_instances(state: &GameState, walls: &Vec<Wall>, scenario: &Scenario) -> Vec<InstanceRaw> {
+    // Instances will be rendered in the same order which they are added into this list.
+    // So they should be added from back to front.
+
     let mut instances = Vec::new();
     instances.push(InstanceRaw::new(
         state.player.position + state.player.texture_offset.extend(0.),
@@ -273,16 +296,22 @@ fn create_instances(state: &GameState, walls: &Vec<Wall>) -> Vec<InstanceRaw> {
         Vector3::new(1., 1., 1.),
         state.player_clone.texture_index,
     ));
-
     walls
         .iter()
         .for_each(|wall| instances.push(InstanceRaw::new(wall.position, wall.size.extend(1.), 1)));
+    instances.push(InstanceRaw::new(
+        scenario.finish_position,
+        Vector3::new(0.75, 0.75, 0.75),
+        2,
+    ));
 
     instances
 }
 
 fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
+
+    let now_micros = game.start_instant.elapsed().as_micros();
 
     if input.confirm && !game.is_replaying {
         reset_state(game);
@@ -291,35 +320,47 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
         game.replay_registry_count = 0;
     }
 
-    let now_micros = game.start_instant.elapsed().as_micros();
-
     update_profiler(&game.profiler);
 
-    let mut update_count = 0;
+    let mut frame_update_count = 0;
     while now_micros - game.last_update_micros > DELTA_MICROS {
-        if game.is_replaying {
-            match get_next_replay_input(game) {
-                Some(new_input) => *input = new_input,
-                None => {
-                    game.is_replaying = false;
-                    game.inputs.clear();
-                    store_input(game, input.clone());
-                    reset_state(game);
+        let replay_input = {
+            if game.is_replaying {
+                match get_next_replay_input(game) {
+                    Some(new_input) => Some(new_input),
+                    None => {
+                        game.is_replaying = false;
+                        game.inputs.clear();
+                        reset_state(game);
+                        store_input(game, input.clone());
+                        None
+                    }
                 }
-            };
-        } else {
-            store_input(game, input.clone());
-        }
+            } else {
+                store_input(game, input.clone());
+                None
+            }
+        };
 
-        update(&mut game.state, &input, game.is_replaying);
+        let update_result = update(
+            &mut game.state,
+            &replay_input.as_ref().unwrap_or(input),
+            game.is_replaying,
+        );
         game.last_update_micros += DELTA_MICROS;
-        update_count += 1;
-        if update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
+        frame_update_count += 1;
+        if frame_update_count >= MAXIMUM_UPDATE_STEPS_PER_FRAME {
             println!("WARNING. Game is slowing down.");
             break;
         }
 
         print_update_log(game, input);
+
+        if matches!(update_result, UpdateResult::FinishedScenario) {
+            game.is_replaying = false;
+            game.inputs.clear();
+            reset_state(game);
+        }
     }
     render(game, now_micros)?;
 
@@ -499,17 +540,19 @@ fn is_pressed(state: &ElementState) -> bool {
     }
 }
 
-fn update(state: &mut GameState, input: &Input, update_clone: bool) {
+fn update<'a>(state: &mut GameState, input: &Input, update_clone: bool) -> UpdateResult {
     puffin::profile_function!();
 
     update_player(&mut state.physics, &mut state.player, input);
     if update_clone {
         update_player(&mut state.physics, &mut state.player_clone, input);
     }
-    update_physics(state);
+    let update_result = update_physics(state);
     update_camera(state);
 
     state.frame_count += 1;
+
+    update_result
 }
 
 fn store_input(game: &mut Game, input: Input) {
@@ -563,7 +606,7 @@ fn update_player(physics: &mut Physics, player: &mut Player, input: &Input) {
     }
 
     // Do our own integration. We know the position we want the player to go, so we just set the
-    // velocity to the value we know will produce a translation to the position we want.
+    // velocity to the value we know will produce a translation into that position.
     let velocity = integrate_velocity_to_delta_position(player, acceleration) / DELTA_SECONDS;
 
     set_physics_velocity(physics, player, velocity);
@@ -635,11 +678,18 @@ fn is_player_grounded(physics: &mut Physics, player: &Player) -> bool {
         .is_some()
 }
 
-fn update_physics(state: &mut GameState) {
+fn update_physics(state: &mut GameState) -> UpdateResult {
     state.physics.run_frame();
 
     update_player_physics(&mut state.player, &state.physics);
     update_player_physics(&mut state.player_clone, &state.physics);
+
+    match state.physics.last_step_intersections().iter().any(|e| {
+        e.collider1 == state.finish_collider_handle || e.collider2 == state.finish_collider_handle
+    }) {
+        true => UpdateResult::FinishedScenario,
+        false => UpdateResult::None,
+    }
 }
 
 fn update_player_physics(player: &mut Player, physics: &Physics) {

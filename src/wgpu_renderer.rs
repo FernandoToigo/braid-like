@@ -239,7 +239,7 @@ impl WgpuRenderer {
                             view_dimension: wgpu::TextureViewDimension::D2,
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         },
-                        count: NonZeroU32::new(2), // Count of different textures on the array.
+                        count: NonZeroU32::new(3), // Count of different textures on the array.
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
@@ -259,6 +259,8 @@ impl WgpuRenderer {
         let player_texture = Texture::from_bytes(&device, &queue, player_texture_bytes, "Player").unwrap();
         let ground_texture_bytes = include_bytes!("..\\res\\sprites\\Ground.png");
         let ground_texture = Texture::from_bytes(&device, &queue, ground_texture_bytes, "Ground").unwrap();
+        let finish_texture_bytes = include_bytes!("..\\res\\sprites\\Cat.png");
+        let finish_texture = Texture::from_bytes(&device, &queue, finish_texture_bytes, "Finish").unwrap();
 
         let textures_bind_group = device.create_bind_group(
             &wgpu::BindGroupDescriptor {
@@ -268,7 +270,8 @@ impl WgpuRenderer {
                         binding: 0,
                         resource: wgpu::BindingResource::TextureViewArray(&[
                             &player_texture.view,
-                            &ground_texture.view]),
+                            &ground_texture.view,
+                            &finish_texture.view]),
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
