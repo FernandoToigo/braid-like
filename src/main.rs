@@ -173,11 +173,11 @@ fn create_first_scenario() -> Scenario {
                 position: Vector3::new(0., 0., 0.),
                 size: Vector2::new(0.5, 20.0),
             },
-            Wall {
+            /*Wall {
                 // Left obstacle
                 position: Vector3::new(-3.33333, -4.0, 0.),
                 size: Vector2::new(1.0, 1.0),
-            },
+            },*/
             Wall {
                 // Right obstacle
                 position: Vector3::new(3.33333, -4.0, 0.),
@@ -191,7 +191,7 @@ fn create_second_scenario() -> Scenario {
     Scenario {
         player_start_position: Vector3::new(-4.83333, -4.5, -1.),
         player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
-        finish_position: Vector3::new(1.25, -2.55, 1.),
+        finish_position: Vector3::new(1.25, -0.55, 1.),
         walls: vec![
             Wall {
                 // Floor
@@ -261,7 +261,7 @@ fn create_game_state(mut physics: Physics, scenario: &Scenario) -> GameState {
         .map(|wall| {
             ColliderBuilder::cuboid(wall.size.x * 0.5, wall.size.y * 0.5)
                 .translation(vector!(wall.position.x, wall.position.y))
-                .friction(0.3)
+                .friction(0.0)
                 .collision_groups(InteractionGroups::new(0b10, 0xFFFF))
                 .build()
         })
@@ -291,7 +291,7 @@ fn create_player(physics: &mut Physics, start_position: Vector3<f32>) -> Player 
     let rigid_body_handle = physics.rigid_bodies.insert(rigid_body);
     let collider = ColliderBuilder::cuboid(0.25, 0.5)
         .translation(vector![0., 0.5])
-        .friction(0.3)
+        .friction(0.0)
         .collision_groups(InteractionGroups::new(0b1, 0xFFFF))
         .build();
     physics
@@ -455,8 +455,8 @@ fn print_update_log(game: &Game, input: &Input) {
         index,
         count,
         input_log,
-        game.state.player_clone.position.x,
-        game.state.player_clone.position.y,
+        game.state.player.position.x,
+        game.state.player.position.y,
         game.state.player.velocity.x,
         game.state.player.velocity.y,
     );
@@ -569,7 +569,7 @@ fn read_events<T>(
                 } => input.jump = is_pressed(state),
                 KeyboardInput {
                     state,
-                    virtual_keycode: Some(VirtualKeyCode::Return),
+                    virtual_keycode: Some(VirtualKeyCode::E),
                     ..
                 } => input.confirm = is_pressed(state),
                 KeyboardInput {
@@ -644,6 +644,7 @@ fn update_camera(state: &mut GameState) {
     game.state.camera.position.y = game.state.player.position.y + 1.;*/
 }
 
+const GROUND_HORIZONTAL_DECCELERATION_PER_SECOND: f32 = 10.;
 const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 25.;
 const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 12.5;
 const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
@@ -698,25 +699,50 @@ fn get_horizontal_acceleration(player: &mut Player, input: &Input, is_grounded: 
         _ => 0.,
     };
 
-    let horizontal_acceleration = match is_grounded {
+    let mut horizontal_acceleration = match is_grounded {
         true => HORIZONTAL_ACCELERATION_PER_SECOND,
         false => JUMP_HORIZONTAL_ACCELERATION_PER_SECOND,
-    };
+    } * sign;
 
-    if player.velocity.x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND
-        && player.velocity.x < MAX_HORIZONTAL_VELOCITY_PER_SECOND
-    {
-        let delta_velocity_x = horizontal_acceleration * DELTA_SECONDS * sign;
+    if is_grounded {
+        horizontal_acceleration += get_horizontal_decceleration(player);
+    }
+
+    let delta_velocity_x = horizontal_acceleration * DELTA_SECONDS;
+
+    if delta_velocity_x > 0. && player.velocity.x < MAX_HORIZONTAL_VELOCITY_PER_SECOND {
         if player.velocity.x + delta_velocity_x > MAX_HORIZONTAL_VELOCITY_PER_SECOND {
             return (MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
-        } else if player.velocity.x + delta_velocity_x < -MAX_HORIZONTAL_VELOCITY_PER_SECOND {
+        }
+
+        return horizontal_acceleration;
+    }
+
+    if delta_velocity_x < 0. && player.velocity.x > -MAX_HORIZONTAL_VELOCITY_PER_SECOND {
+        if player.velocity.x + delta_velocity_x < -MAX_HORIZONTAL_VELOCITY_PER_SECOND {
             return (-MAX_HORIZONTAL_VELOCITY_PER_SECOND - player.velocity.x) / DELTA_SECONDS;
         }
 
-        return horizontal_acceleration * sign;
+        return horizontal_acceleration;
     }
 
     0.
+}
+
+fn get_horizontal_decceleration(player: &Player) -> f32 {
+    let velocity_sign = match player.velocity.x {
+        x if x >= 0. => 1.,
+        x if x < 0. => -1.,
+        _ => 0.,
+    };
+
+    let delta_decceleration =
+        GROUND_HORIZONTAL_DECCELERATION_PER_SECOND * -velocity_sign * DELTA_SECONDS;
+
+    match player.velocity.x.abs() < delta_decceleration.abs() {
+        true => -player.velocity.x,
+        false => GROUND_HORIZONTAL_DECCELERATION_PER_SECOND * -velocity_sign,
+    }
 }
 
 fn get_vertical_acceleration(player: &Player) -> f32 {
