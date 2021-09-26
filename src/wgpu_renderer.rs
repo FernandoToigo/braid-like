@@ -410,6 +410,17 @@ impl WgpuRenderer {
         self.depth_texture = Texture::create_depth_texture(&self.device, &self.surface_config, "depth_texture");
     }
 
+    pub fn replace_instances(&mut self, instances: Vec<InstanceRaw>) {
+        self.instances = instances;
+        self.instance_buffer = self.device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&self.instances),
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+    }
+
     pub fn render(&mut self, game_state: &GameState, interp_percent: f32) -> Result<(), wgpu::SurfaceError> {
         self.update_buffers(&game_state, interp_percent);
         self.render_frame()

@@ -12,12 +12,14 @@ use winit::event_loop::ControlFlow;
 const DELTA_MICROS: u128 = 33333;
 const DELTA_SECONDS: f32 = DELTA_MICROS as f32 * 1e-6;
 const MAXIMUM_UPDATE_STEPS_PER_FRAME: u32 = 10;
+const SCENARIO_COUNT: usize = 2;
 
 pub struct Game {
     renderer: WgpuRenderer,
     start_instant: Instant,
     last_frame_micros: u128,
     last_update_micros: u128,
+    scenario_index: usize,
     scenario: Scenario,
     state: GameState,
     profiler: puffin_http::Server,
@@ -95,9 +97,10 @@ fn main() {
     let profiler = init_profiler();
     let physics = init_physics(DELTA_SECONDS);
 
-    let scenario = create_first_scenario();
+    let scenario_index = 0;
+    let scenario = create_scenario(scenario_index);
     let state = create_game_state(physics, &scenario);
-    let instances = create_instances(&state, &scenario.walls, &scenario);
+    let instances = create_instances(&state, &scenario);
     let (event_loop, renderer) = block_on(WgpuRenderer::init(instances));
 
     let mut game = Game {
@@ -105,6 +108,7 @@ fn main() {
         start_instant: Instant::now(),
         last_frame_micros: 0,
         last_update_micros: 0,
+        scenario_index,
         scenario,
         state,
         profiler,
@@ -128,6 +132,14 @@ fn main() {
 
         *control_flow = resolve_frame(&event_results, frame_result);
     });
+}
+
+fn create_scenario(index: usize) -> Scenario {
+    match index {
+        0 => create_first_scenario(),
+        1 => create_second_scenario(),
+        _ => panic!("There is no scenario with index {}", index),
+    }
 }
 
 fn create_first_scenario() -> Scenario {
@@ -170,6 +182,46 @@ fn create_first_scenario() -> Scenario {
                 // Right obstacle
                 position: Vector3::new(3.33333, -4.0, 0.),
                 size: Vector2::new(1.0, 1.0),
+            },
+        ],
+    }
+}
+
+fn create_second_scenario() -> Scenario {
+    Scenario {
+        player_start_position: Vector3::new(-4.83333, -4.5, -1.),
+        player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
+        finish_position: Vector3::new(1.25, -2.55, 1.),
+        walls: vec![
+            Wall {
+                // Floor
+                position: Vector3::new(0., -5.0, 0.),
+                size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Ceiling
+                position: Vector3::new(0., 5.0, 0.),
+                size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Left wall
+                position: Vector3::new(-6.66666, 0., 0.),
+                size: Vector2::new(1., 20.0),
+            },
+            Wall {
+                // Right wall
+                position: Vector3::new(6.66666, 0., 0.),
+                size: Vector2::new(1., 20.0),
+            },
+            Wall {
+                // Middle wall
+                position: Vector3::new(0., 0., 0.),
+                size: Vector2::new(0.5, 20.0),
+            },
+            Wall {
+                // Right platform
+                position: Vector3::new(1.25, -3.0, 0.),
+                size: Vector2::new(3.0, 0.5),
             },
         ],
     }
@@ -281,7 +333,7 @@ fn reset_player(physics: &mut Physics, player: &mut Player, start_position: Vect
     player_rigid_body.set_translation(vector![start_position.x, start_position.y], true);
 }
 
-fn create_instances(state: &GameState, walls: &Vec<Wall>, scenario: &Scenario) -> Vec<InstanceRaw> {
+fn create_instances(state: &GameState, scenario: &Scenario) -> Vec<InstanceRaw> {
     // Instances will be rendered in the same order which they are added into this list.
     // So they should be added from back to front.
 
@@ -296,7 +348,8 @@ fn create_instances(state: &GameState, walls: &Vec<Wall>, scenario: &Scenario) -
         Vector3::new(1., 1., 1.),
         state.player_clone.texture_index,
     ));
-    walls
+    scenario
+        .walls
         .iter()
         .for_each(|wall| instances.push(InstanceRaw::new(wall.position, wall.size.extend(1.), 1)));
     instances.push(InstanceRaw::new(
@@ -357,9 +410,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
         print_update_log(game, input);
 
         if matches!(update_result, UpdateResult::FinishedScenario) {
-            game.is_replaying = false;
-            game.inputs.clear();
-            reset_state(game);
+            finish_scenario(game);
         }
     }
     render(game, now_micros)?;
@@ -367,6 +418,21 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
     game.last_frame_micros = now_micros;
 
     Ok(())
+}
+
+fn finish_scenario(game: &mut Game) {
+    game.is_replaying = false;
+    game.inputs.clear();
+    if game.scenario_index + 1 < SCENARIO_COUNT {
+        game.scenario_index += 1;
+        game.scenario = create_scenario(game.scenario_index);
+        let physics = init_physics(DELTA_SECONDS);
+        game.state = create_game_state(physics, &game.scenario);
+        let instances = create_instances(&game.state, &game.scenario);
+        game.renderer.replace_instances(instances);
+    } else {
+        reset_state(game);
+    }
 }
 
 fn print_update_log(game: &Game, input: &Input) {
@@ -685,7 +751,9 @@ fn update_physics(state: &mut GameState) -> UpdateResult {
     update_player_physics(&mut state.player_clone, &state.physics);
 
     match state.physics.last_step_intersections().iter().any(|e| {
-        e.collider1 == state.finish_collider_handle || e.collider2 == state.finish_collider_handle
+        e.intersecting
+            && (e.collider1 == state.finish_collider_handle
+                || e.collider2 == state.finish_collider_handle)
     }) {
         true => UpdateResult::FinishedScenario,
         false => UpdateResult::None,
