@@ -25,6 +25,7 @@ pub struct Game {
     profiler: puffin_http::Server,
     inputs: Vec<InputRegistry>,
     is_replaying: bool,
+    is_replaying_finished: bool,
     replay_registry_index: usize,
     replay_registry_count: u128,
 }
@@ -60,7 +61,8 @@ struct Input {
     right: bool,
     left: bool,
     jump: bool,
-    confirm: bool,
+    jump_down: bool,
+    confirm_down: bool,
     debug_one: bool,
 }
 
@@ -114,16 +116,20 @@ fn main() {
         profiler,
         inputs: Vec::with_capacity(9000),
         is_replaying: false,
+        is_replaying_finished: false,
         replay_registry_index: 0,
         replay_registry_count: 0,
     };
 
+    let mut last_input = Input {
+        ..Default::default()
+    };
     let mut input = Input {
         ..Default::default()
     };
 
     event_loop.run(move |event, _, control_flow| {
-        let event_results = read_events(event, &mut game.renderer, &mut input);
+        let event_results = read_events(event, &mut game.renderer, &mut input, &mut last_input);
 
         let frame_result = match event_results.events_finished {
             true => frame(&mut game, &mut input),
@@ -144,8 +150,8 @@ fn create_scenario(index: usize) -> Scenario {
 
 fn create_first_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-4.83333, -4.5, -1.),
-        player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
+        player_start_position: Vector3::new(-4.91666, -4.5, -1.),
+        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
         finish_position: Vector3::new(4.83333, -4.3, 1.),
         walls: vec![
             Wall {
@@ -160,24 +166,24 @@ fn create_first_scenario() -> Scenario {
             },
             Wall {
                 // Left wall
-                position: Vector3::new(-6.66666, 0., 0.),
-                size: Vector2::new(1., 20.0),
+                position: Vector3::new(-6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
             },
             Wall {
                 // Right wall
-                position: Vector3::new(6.66666, 0., 0.),
-                size: Vector2::new(1., 20.0),
+                position: Vector3::new(6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
             },
             Wall {
                 // Middle wall
                 position: Vector3::new(0., 0., 0.),
                 size: Vector2::new(0.5, 20.0),
             },
-            /*Wall {
+            Wall {
                 // Left obstacle
                 position: Vector3::new(-3.33333, -4.0, 0.),
                 size: Vector2::new(1.0, 1.0),
-            },*/
+            },
             Wall {
                 // Right obstacle
                 position: Vector3::new(3.33333, -4.0, 0.),
@@ -189,8 +195,8 @@ fn create_first_scenario() -> Scenario {
 
 fn create_second_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-4.83333, -4.5, -1.),
-        player_clone_start_position: Vector3::new(1.83333, -4.5, -1.),
+        player_start_position: Vector3::new(-4.91666, -4.5, -1.),
+        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
         finish_position: Vector3::new(1.25, -0.55, 1.),
         walls: vec![
             Wall {
@@ -205,13 +211,13 @@ fn create_second_scenario() -> Scenario {
             },
             Wall {
                 // Left wall
-                position: Vector3::new(-6.66666, 0., 0.),
-                size: Vector2::new(1., 20.0),
+                position: Vector3::new(-6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
             },
             Wall {
                 // Right wall
-                position: Vector3::new(6.66666, 0., 0.),
-                size: Vector2::new(1., 20.0),
+                position: Vector3::new(6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
             },
             Wall {
                 // Middle wall
@@ -366,7 +372,7 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
 
     let now_micros = game.start_instant.elapsed().as_micros();
 
-    if input.confirm && !game.is_replaying {
+    if input.confirm_down && !game.is_replaying {
         reset_state(game);
         game.is_replaying = true;
         game.replay_registry_index = 0;
@@ -375,18 +381,34 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
 
     update_profiler(&game.profiler);
 
+    update_loop(game, now_micros, input);
+    render(game, now_micros)?;
+
+    game.last_frame_micros = now_micros;
+    Ok(())
+}
+
+fn update_loop(game: &mut Game, now_micros: u128, input: &mut Input) {
     let mut frame_update_count = 0;
     while now_micros - game.last_update_micros > DELTA_MICROS {
+        if game.is_replaying_finished {
+            if input.confirm_down {
+                game.is_replaying = false;
+                game.is_replaying_finished = false;
+                game.inputs.clear();
+                reset_state(game);
+            } else {
+                return;
+            }
+        }
+
         let replay_input = {
             if game.is_replaying {
                 match get_next_replay_input(game) {
                     Some(new_input) => Some(new_input),
                     None => {
-                        game.is_replaying = false;
-                        game.inputs.clear();
-                        reset_state(game);
-                        store_input(game, input.clone());
-                        None
+                        game.is_replaying_finished = true;
+                        return;
                     }
                 }
             } else {
@@ -412,12 +434,10 @@ fn frame(game: &mut Game, input: &mut Input) -> anyhow::Result<(), wgpu::Surface
         if matches!(update_result, UpdateResult::FinishedScenario) {
             finish_scenario(game);
         }
+
+        input.confirm_down = false;
+        input.jump_down = false;
     }
-    render(game, now_micros)?;
-
-    game.last_frame_micros = now_micros;
-
-    Ok(())
 }
 
 fn finish_scenario(game: &mut Game) {
@@ -529,6 +549,7 @@ fn read_events<T>(
     event: Event<'_, T>,
     renderer: &mut WgpuRenderer,
     input: &mut Input,
+    last_input: &mut Input,
 ) -> EventResults {
     puffin::profile_function!();
 
@@ -566,12 +587,19 @@ fn read_events<T>(
                     state,
                     virtual_keycode: Some(VirtualKeyCode::Space),
                     ..
-                } => input.jump = is_pressed(state),
+                } => {
+                    input.jump = is_pressed(state);
+                    input.jump_down = is_pressed_down(state, last_input.jump_down);
+                    last_input.jump_down = is_pressed(state);
+                }
                 KeyboardInput {
                     state,
                     virtual_keycode: Some(VirtualKeyCode::E),
                     ..
-                } => input.confirm = is_pressed(state),
+                } => {
+                    input.confirm_down = is_pressed_down(state, last_input.confirm_down);
+                    last_input.confirm_down = is_pressed(state);
+                }
                 KeyboardInput {
                     state,
                     virtual_keycode: Some(VirtualKeyCode::F1),
@@ -606,7 +634,11 @@ fn is_pressed(state: &ElementState) -> bool {
     }
 }
 
-fn update<'a>(state: &mut GameState, input: &Input, update_clone: bool) -> UpdateResult {
+fn is_pressed_down(state: &ElementState, was_pressed: bool) -> bool {
+    matches!(state, ElementState::Pressed) && !was_pressed
+}
+
+fn update(state: &mut GameState, input: &Input, update_clone: bool) -> UpdateResult {
     puffin::profile_function!();
 
     update_player(&mut state.physics, &mut state.player, input);
@@ -667,7 +699,7 @@ fn update_player(physics: &mut Physics, player: &mut Player, input: &Input) {
 
     player.velocity += acceleration * DELTA_SECONDS;
 
-    if is_grounded && input.jump {
+    if is_grounded && input.jump_down {
         player.velocity.y = JUMP_VELOCITY;
         player.force_jumping = true;
     }
@@ -801,7 +833,7 @@ fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
     puffin::profile_function!();
 
     let micros_since_last_updated = (now_micros - game.last_update_micros) as f32;
-    let interp_percent = micros_since_last_updated / DELTA_MICROS as f32;
+    let interp_percent = (micros_since_last_updated / DELTA_MICROS as f32).min(1.);
 
     game.renderer.render(&game.state, interp_percent)
 }
@@ -840,6 +872,7 @@ fn jump_height_test() {
 
     let input = Input {
         jump: true,
+        jump_down: true,
         ..Default::default()
     };
 
@@ -880,6 +913,7 @@ fn jump_distance_test() {
                 jump_start_x = state.player.position.x;
             }
             input.jump = true;
+            input.jump_down = true;
         }
 
         update(&mut state, &input, false);
