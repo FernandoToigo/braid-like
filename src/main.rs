@@ -99,7 +99,7 @@ fn main() {
     let profiler = init_profiler();
     let physics = init_physics(DELTA_SECONDS);
 
-    let scenario_index = 0;
+    let scenario_index = 2;
     let scenario = create_scenario(scenario_index);
     let state = create_game_state(physics, &scenario);
     let instances = create_instances(&state, &scenario);
@@ -144,6 +144,7 @@ fn create_scenario(index: usize) -> Scenario {
     match index {
         0 => create_first_scenario(),
         1 => create_second_scenario(),
+        2 => create_third_scenario(),
         _ => panic!("There is no scenario with index {}", index),
     }
 }
@@ -228,6 +229,56 @@ fn create_second_scenario() -> Scenario {
                 // Bottom Platform
                 position: Vector3::new(-2.6666, -3.0, 0.),
                 size: Vector2::new(8.0, 0.5),
+            },
+        ],
+    }
+}
+
+fn create_third_scenario() -> Scenario {
+    Scenario {
+        player_start_position: Vector3::new(-4.91666, 0.25, -1.),
+        player_clone_start_position: Vector3::new(-4.91666, -4.5, -1.),
+        finish_position: Vector3::new(5.0, -4.3, 1.),
+        walls: vec![
+            Wall {
+                // Floor
+                position: Vector3::new(0., -5.0, 0.),
+                size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Dividing Floor
+                position: Vector3::new(0., 0., 0.),
+                size: Vector2::new(100., 0.5),
+            },
+            Wall {
+                // Ceiling
+                position: Vector3::new(0., 5.0, 0.),
+                size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Left wall
+                position: Vector3::new(-6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
+            },
+            Wall {
+                // Right wall
+                position: Vector3::new(6.41666, 0., 0.),
+                size: Vector2::new(0.5, 20.0),
+            },
+            Wall {
+                // Big Platform
+                position: Vector3::new(-0.6666, -3.75, 0.),
+                size: Vector2::new(5.0, 2.0),
+            },
+            Wall {
+                // Hole Bottom Wall
+                position: Vector3::new(2.0834, -3.3, 0.),
+                size: Vector2::new(0.5, 3.0),
+            },
+            Wall {
+                // Hole Top Wall
+                position: Vector3::new(2.0834, -0.35, 0.),
+                size: Vector2::new(0.5, 0.65),
             },
         ],
     }
@@ -678,7 +729,7 @@ fn update_camera(state: &mut GameState) {
 
 const GROUND_HORIZONTAL_DECCELERATION_PER_SECOND: f32 = 10.;
 const HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 25.;
-const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 12.5;
+const JUMP_HORIZONTAL_ACCELERATION_PER_SECOND: f32 = 20.0;
 const MAX_HORIZONTAL_VELOCITY_PER_SECOND: f32 = 4.;
 const JUMP_HEIGHT: f32 = 2.0;
 const JUMP_HORIZONTAL_HALF_TOTAL_DISTANCE: f32 = 1.8;
