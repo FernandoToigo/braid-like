@@ -150,14 +150,19 @@ fn create_scenario(index: usize) -> Scenario {
 
 fn create_first_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-4.91666, -4.5, -1.),
-        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
+        player_start_position: Vector3::new(-4.91666, 0.5, -1.),
+        player_clone_start_position: Vector3::new(-4.91666, -4.5, -1.),
         finish_position: Vector3::new(4.83333, -4.3, 1.),
         walls: vec![
             Wall {
                 // Floor
                 position: Vector3::new(0., -5.0, 0.),
                 size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Dividing Floor
+                position: Vector3::new(0., 0., 0.),
+                size: Vector2::new(100., 0.5),
             },
             Wall {
                 // Ceiling
@@ -175,18 +180,13 @@ fn create_first_scenario() -> Scenario {
                 size: Vector2::new(0.5, 20.0),
             },
             Wall {
-                // Middle wall
-                position: Vector3::new(0., 0., 0.),
-                size: Vector2::new(0.5, 20.0),
-            },
-            Wall {
-                // Left obstacle
-                position: Vector3::new(-3.33333, -4.0, 0.),
+                // Top Obstacle
+                position: Vector3::new(-3.33333, 0.75, 0.),
                 size: Vector2::new(1.0, 1.0),
             },
             Wall {
-                // Right obstacle
-                position: Vector3::new(3.33333, -4.0, 0.),
+                // Bottom Obstacle
+                position: Vector3::new(-3.33333, -4.0, 0.),
                 size: Vector2::new(1.0, 1.0),
             },
         ],
@@ -477,8 +477,8 @@ fn print_update_log(game: &Game, input: &Input) {
         input_log,
         game.state.player.position.x,
         game.state.player.position.y,
-        game.state.player.velocity.x,
-        game.state.player.velocity.y,
+        game.state.player_clone.position.x,
+        game.state.player_clone.position.y,
     );
 }
 
