@@ -150,7 +150,7 @@ fn create_scenario(index: usize) -> Scenario {
 
 fn create_first_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-4.91666, 0.5, -1.),
+        player_start_position: Vector3::new(-4.91666, 0.25, -1.),
         player_clone_start_position: Vector3::new(-4.91666, -4.5, -1.),
         finish_position: Vector3::new(4.83333, -4.3, 1.),
         walls: vec![
@@ -195,14 +195,19 @@ fn create_first_scenario() -> Scenario {
 
 fn create_second_scenario() -> Scenario {
     Scenario {
-        player_start_position: Vector3::new(-4.91666, -4.5, -1.),
-        player_clone_start_position: Vector3::new(1.5, -4.5, -1.),
-        finish_position: Vector3::new(1.25, -0.55, 1.),
+        player_start_position: Vector3::new(-4.91666, 0.25, -1.),
+        player_clone_start_position: Vector3::new(-4.91666, -4.5, -1.),
+        finish_position: Vector3::new(-5.0, -2.55, 1.),
         walls: vec![
             Wall {
                 // Floor
                 position: Vector3::new(0., -5.0, 0.),
                 size: Vector2::new(100., 1.0),
+            },
+            Wall {
+                // Dividing Floor
+                position: Vector3::new(0., 0., 0.),
+                size: Vector2::new(100., 0.5),
             },
             Wall {
                 // Ceiling
@@ -220,14 +225,9 @@ fn create_second_scenario() -> Scenario {
                 size: Vector2::new(0.5, 20.0),
             },
             Wall {
-                // Middle wall
-                position: Vector3::new(0., 0., 0.),
-                size: Vector2::new(0.5, 20.0),
-            },
-            Wall {
-                // Right platform
-                position: Vector3::new(1.25, -3.0, 0.),
-                size: Vector2::new(3.0, 0.5),
+                // Bottom Platform
+                position: Vector3::new(-2.6666, -3.0, 0.),
+                size: Vector2::new(8.0, 0.5),
             },
         ],
     }
@@ -469,7 +469,7 @@ fn print_update_log(game: &Game, input: &Input) {
     };
 
     println!(
-        "[{} ({}s)] ([{}]:{}:{}) P({};{}) ->({};{})",
+        "[{} ({}s)] ([{}]:{}:{}) P1({};{}) P2({};{})",
         game.state.frame_count,
         micros_to_seconds(game.last_update_micros),
         index,
