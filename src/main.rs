@@ -12,7 +12,7 @@ use winit::event_loop::ControlFlow;
 const DELTA_MICROS: u128 = 33333;
 const DELTA_SECONDS: f32 = DELTA_MICROS as f32 * 1e-6;
 const MAXIMUM_UPDATE_STEPS_PER_FRAME: u32 = 10;
-const SCENARIO_COUNT: usize = 2;
+const SCENARIO_COUNT: usize = 3;
 
 pub struct Game {
     renderer: WgpuRenderer,
@@ -99,7 +99,7 @@ fn main() {
     let profiler = init_profiler();
     let physics = init_physics(DELTA_SECONDS);
 
-    let scenario_index = 2;
+    let scenario_index = 0;
     let scenario = create_scenario(scenario_index);
     let state = create_game_state(physics, &scenario);
     let instances = create_instances(&state, &scenario);
@@ -267,8 +267,8 @@ fn create_third_scenario() -> Scenario {
             },
             Wall {
                 // Big Platform
-                position: Vector3::new(-0.6666, -3.75, 0.),
-                size: Vector2::new(5.0, 2.0),
+                position: Vector3::new(-0.1666, -3.75, 0.),
+                size: Vector2::new(4.0, 2.0),
             },
             Wall {
                 // Hole Bottom Wall
@@ -496,14 +496,15 @@ fn finish_scenario(game: &mut Game) {
     game.inputs.clear();
     if game.scenario_index + 1 < SCENARIO_COUNT {
         game.scenario_index += 1;
-        game.scenario = create_scenario(game.scenario_index);
-        let physics = init_physics(DELTA_SECONDS);
-        game.state = create_game_state(physics, &game.scenario);
-        let instances = create_instances(&game.state, &game.scenario);
-        game.renderer.replace_instances(instances);
     } else {
-        reset_state(game);
+        game.scenario_index = 0;
     }
+
+    game.scenario = create_scenario(game.scenario_index);
+    let physics = init_physics(DELTA_SECONDS);
+    game.state = create_game_state(physics, &game.scenario);
+    let instances = create_instances(&game.state, &game.scenario);
+    game.renderer.replace_instances(instances);
 }
 
 fn print_update_log(game: &Game, input: &Input) {
@@ -713,6 +714,10 @@ fn store_input(game: &mut Game, input: Input) {
     } else {
         let last_input_index = game.inputs.len() - 1;
         if game.inputs[last_input_index].input == input {
+            if last_input_index == 0 && input.is_empty() {
+                return;
+            }
+
             game.inputs[last_input_index].count += 1;
         } else {
             game.inputs.push(InputRegistry { input, count: 1 });
@@ -890,8 +895,8 @@ fn render(game: &mut Game, now_micros: u128) -> Result<(), wgpu::SurfaceError> {
 }
 
 impl Input {
-    fn _has_any_input(&self) -> bool {
-        self.left || self.right || self.jump
+    fn is_empty(&self) -> bool {
+        !self.left && !self.right && !self.jump
     }
 }
 
