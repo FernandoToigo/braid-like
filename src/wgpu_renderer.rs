@@ -200,6 +200,7 @@ impl WgpuRenderer {
             compatible_surface: Some(&surface),
         },
         ).await.unwrap();
+        println!("Using adapter {}", adapter.get_info().name);
 
         let (device, queue) = adapter.request_device(&wgpu::DeviceDescriptor {
             features: wgpu::Features::UNSIZED_BINDING_ARRAY
